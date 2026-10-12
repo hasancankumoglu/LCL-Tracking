@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Konteyner Takip Sistemi</title>
+    <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
+    <!--
+      The vessel-tracking iframe (VesselTrackingSection.tsx) navigates to
+      MarineTraffic's real embed page via `frame-src` rather than injecting a
+      third-party script via `srcDoc`. Because it's a genuine cross-origin
+      navigation (not a local scheme like srcdoc/data/blob), it does NOT
+      inherit this policy and runs under its own origin/CSP — no script-src/
+      connect-src allowances are needed here for it. The iframe is sandboxed
+      with `allow-scripts allow-same-origin allow-popups`: since
+      marinetraffic.com is a genuinely different origin from this app, the
+      standard same-origin policy still prevents it from reaching this app's
+      window/contextBridge, sandbox or not.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: app-doc:; connect-src 'self'; frame-src 'self' https://www.marinetraffic.com"
+    />
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
