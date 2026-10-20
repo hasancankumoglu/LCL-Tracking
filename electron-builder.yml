@@ -1,5 +1,5 @@
-appId: com.palmmarine.halilsportal
-productName: Konteyner Takip Sistemi
+appId: com.palmmarine.lcltracking
+productName: LCL-Tracking
 directories:
   buildResources: build
 files:
@@ -12,7 +12,7 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: halils-portal
+  executableName: lcl-tracking
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
@@ -38,6 +38,11 @@ linux:
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
+# "provider: github" burada sadece latest.yml'nin doğru şekilde üretilmesi için var - asıl
+# yükleme ASLA electron-builder'ın kendi --publish mekanizması ile yapılmaz (parallel asset
+# upload'larda aynı tag için birden fazla release/draft oluşturan çözülmemiş bir yarış durumu
+# hatası var). Gerçek yükleme scripts/publish-github-release.mjs ile sırayla yapılır.
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  owner: hasancankumoglu
+  repo: LCL-Tracking

@@ -12,13 +12,13 @@ import {
   BorderStyle
 } from 'docx'
 import type { BookingReportData, RangeReportData } from '../../shared/types'
-import { BOOKING_STATUS_LABELS, DOCUMENT_TYPE_LABELS } from '../../shared/types'
+import { mt, getDateLocale } from '../i18n/language'
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return ''
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString('tr-TR')
+  return date.toLocaleDateString(getDateLocale())
 }
 
 const CELL_BORDER = {
@@ -106,48 +106,58 @@ export async function buildBookingReportDocx(data: BookingReportData): Promise<B
       new Paragraph({
         heading: HeadingLevel.HEADING_1,
         pageBreakBefore: index > 0,
-        children: [new TextRun({ text: `Booking Raporu - ${booking.bookingNo}`, color: '0B2A5B' })]
+        children: [
+          new TextRun({
+            text: mt('reports.bookingReportTitleDocx', { bookingNo: booking.bookingNo }),
+            color: '0B2A5B'
+          })
+        ]
       })
     )
     if (index === 0) {
-      children.push(subtitle(`Oluşturma tarihi: ${formatDate(data.generatedAt)}`))
+      children.push(subtitle(mt('reports.generatedAt', { date: formatDate(data.generatedAt) })))
     }
     const missingDocsText =
       missingDocumentTypes.length > 0
-        ? missingDocumentTypes.map((t) => DOCUMENT_TYPE_LABELS[t]).join(', ')
-        : 'Yok'
+        ? missingDocumentTypes.map((t) => mt(`enums.documentType.${t}`)).join(', ')
+        : mt('common.none')
     children.push(
       spacer(),
       infoTable([
-        ['Booking No', booking.bookingNo],
-        ['Vessel Departure', formatDate(booking.vesselDeparture)],
-        ['Declaration Cut Off', formatDate(booking.declarationCutOff)],
-        ['SI Cut Off', formatDate(booking.siCutOff)],
-        ['Kategori', booking.category ?? ''],
-        ['Destination', booking.destination ?? ''],
-        ['Line', booking.line ?? ''],
-        ['POL', booking.pol ?? ''],
-        ['Durum', BOOKING_STATUS_LABELS[booking.status]],
-        ['Eksik Evrak', missingDocsText],
-        ['Notlar', booking.notes ?? '']
+        [mt('reports.bookingNo'), booking.bookingNo],
+        [mt('reports.vesselDeparture'), formatDate(booking.vesselDeparture)],
+        [mt('reports.declarationCutOff'), formatDate(booking.declarationCutOff)],
+        [mt('reports.siCutOff'), formatDate(booking.siCutOff)],
+        [mt('reports.category'), booking.category ?? ''],
+        [mt('reports.destination'), booking.destination ?? ''],
+        [mt('reports.line'), booking.line ?? ''],
+        [mt('reports.pol'), booking.pol ?? ''],
+        [mt('reports.status'), mt(`enums.bookingStatus.${booking.status}`)],
+        [mt('reports.missingDocuments'), missingDocsText],
+        [mt('common.notes'), booking.notes ?? '']
       ]),
       spacer(),
       new Paragraph({
         heading: HeadingLevel.HEADING_2,
-        children: [new TextRun({ text: `Konteynerler (${containers.length})`, color: '0B2A5B' })]
+        children: [
+          new TextRun({
+            text: mt('reports.containersHeadingDocx', { count: containers.length }),
+            color: '0B2A5B'
+          })
+        ]
       }),
       spacer(),
       containers.length > 0
         ? dataTable(
             [
-              'Konteyner No',
-              'Tip',
-              'Mühür No',
-              'Çekici',
-              'Dorse',
-              'Şoför Telefon',
-              'Gemi',
-              'Notlar'
+              mt('reports.containerNo'),
+              mt('reports.type'),
+              mt('reports.sealNo'),
+              mt('reports.truckPlate'),
+              mt('reports.trailerPlate'),
+              mt('reports.driverPhone'),
+              mt('reports.vessel'),
+              mt('common.notes')
             ],
             containers.map((c) => [
               c.containerNo ?? '',
@@ -160,7 +170,7 @@ export async function buildBookingReportDocx(data: BookingReportData): Promise<B
               c.notes ?? ''
             ])
           )
-        : new Paragraph({ children: [new TextRun({ text: 'Kayıtlı konteyner yok.' })] })
+        : new Paragraph({ children: [new TextRun({ text: mt('reports.noContainers') })] })
     )
   })
 
@@ -174,7 +184,7 @@ export async function buildRangeReportDocx(data: RangeReportData): Promise<Buffe
   const { bookings } = data
 
   const statusRows = Object.entries(data.statusCounts).map(([status, count]) => [
-    BOOKING_STATUS_LABELS[status as keyof typeof BOOKING_STATUS_LABELS],
+    mt(`enums.bookingStatus.${status}`),
     String(count)
   ])
   const typeRows = Object.entries(data.containerTypeCounts).map(([type, count]) => [
@@ -186,44 +196,51 @@ export async function buildRangeReportDocx(data: RangeReportData): Promise<Buffe
     sections: [
       {
         children: [
-          title(`Dönemsel Rapor - ${data.rangeLabel}`),
-          subtitle(`Oluşturma tarihi: ${formatDate(data.generatedAt)}`),
+          title(mt('reports.rangeReportTitleDocx', { rangeLabel: data.rangeLabel })),
+          subtitle(mt('reports.generatedAt', { date: formatDate(data.generatedAt) })),
           spacer(),
           infoTable([
-            ['Toplam Booking', String(bookings.length)],
-            ['Toplam Konteyner', String(data.totalContainers)]
+            [mt('reports.totalBookings'), String(bookings.length)],
+            [mt('reports.totalContainers'), String(data.totalContainers)]
           ]),
           spacer(),
           new Paragraph({
             heading: HeadingLevel.HEADING_2,
-            children: [new TextRun({ text: 'Statü Dağılımı', color: '0B2A5B' })]
+            children: [new TextRun({ text: mt('reports.statusDistribution'), color: '0B2A5B' })]
           }),
           spacer(),
-          dataTable(['Statü', 'Adet'], statusRows),
+          dataTable([mt('reports.statusColumn'), mt('reports.countColumn')], statusRows),
           spacer(),
           new Paragraph({
             heading: HeadingLevel.HEADING_2,
-            children: [new TextRun({ text: 'Konteyner Tipi Dağılımı', color: '0B2A5B' })]
+            children: [
+              new TextRun({ text: mt('reports.containerTypeDistribution'), color: '0B2A5B' })
+            ]
           }),
           spacer(),
-          dataTable(['Tip', 'Adet'], typeRows),
+          dataTable([mt('reports.typeColumn'), mt('reports.countColumn')], typeRows),
           spacer(),
           new Paragraph({
             heading: HeadingLevel.HEADING_2,
-            children: [new TextRun({ text: `Bookingler (${bookings.length})`, color: '0B2A5B' })]
+            children: [
+              new TextRun({
+                text: mt('reports.bookingsHeadingDocx', { count: bookings.length }),
+                color: '0B2A5B'
+              })
+            ]
           }),
           spacer(),
           bookings.length > 0
             ? dataTable(
                 [
-                  'Booking No',
-                  'Vessel Departure',
-                  'Destination',
-                  'Line',
-                  'POL',
-                  'Durum',
-                  'Konteyner',
-                  'Eksik Evrak'
+                  mt('reports.bookingNo'),
+                  mt('reports.vesselDeparture'),
+                  mt('reports.destination'),
+                  mt('reports.line'),
+                  mt('reports.pol'),
+                  mt('reports.status'),
+                  mt('reports.containerCountSuffix'),
+                  mt('reports.missingDocuments')
                 ],
                 bookings.map((b) => [
                   b.bookingNo,
@@ -231,14 +248,14 @@ export async function buildRangeReportDocx(data: RangeReportData): Promise<Buffe
                   b.destination ?? '',
                   b.line ?? '',
                   b.pol ?? '',
-                  BOOKING_STATUS_LABELS[b.status],
+                  mt(`enums.bookingStatus.${b.status}`),
                   String(b.containerCount),
                   b.missingDocumentTypes.length > 0
-                    ? b.missingDocumentTypes.map((t) => DOCUMENT_TYPE_LABELS[t]).join(', ')
-                    : 'Yok'
+                    ? b.missingDocumentTypes.map((t) => mt(`enums.documentType.${t}`)).join(', ')
+                    : mt('common.none')
                 ])
               )
-            : new Paragraph({ children: [new TextRun({ text: 'Seçili dönemde booking yok.' })] })
+            : new Paragraph({ children: [new TextRun({ text: mt('reports.noBookingsInRange') })] })
         ]
       }
     ]

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   vesselName?: string | null
@@ -28,6 +29,7 @@ export default function VesselTrackingSection({
   mmsiNumber,
   height = 380
 }: Props): React.JSX.Element {
+  const { t } = useTranslation()
   const [online, setOnline] = useState(navigator.onLine)
 
   useEffect(() => {
@@ -53,12 +55,7 @@ export default function VesselTrackingSection({
   // external link (opens in the default browser, no CORS/CSP concerns there).
   if (!mmsi) {
     if (!imo && !trimmedName) {
-      return (
-        <div className="empty-state">
-          Bu booking için IMO/MMSI numarası girilmedi. Gemi konumunu görüntülemek için booking
-          kaydına IMO, MMSI veya gemi adı ekleyin.
-        </div>
-      )
+      return <div className="empty-state">{t('vesselTracking.noImoMmsi')}</div>
     }
     const searchUrl = imo
       ? `https://www.vesselfinder.com/vessels/details/${imo}`
@@ -66,11 +63,10 @@ export default function VesselTrackingSection({
     const label = imo ? `IMO ${imo}` : `"${trimmedName}"`
     return (
       <div className="empty-state">
-        Haritada canlı takip için MMSI numarası gerekiyor. {label} için VesselFinder&apos;da
-        arayabilirsiniz.
+        {t('vesselTracking.needMmsiForLiveMap', { label })}
         <div style={{ marginTop: 8 }}>
           <a href={searchUrl} target="_blank" rel="noopener noreferrer">
-            {label} için VesselFinder&apos;da ara
+            {t('vesselTracking.searchOnVesselFinder', { label })}
           </a>
         </div>
       </div>
@@ -78,17 +74,15 @@ export default function VesselTrackingSection({
   }
 
   if (!online) {
-    return (
-      <div className="empty-state">
-        Gemi konumunu görüntülemek için internet bağlantısı gerekli.
-      </div>
-    )
+    return <div className="empty-state">{t('vesselTracking.needInternet')}</div>
   }
 
   return (
     <iframe
       key={mmsi}
-      title={vesselName ? `Gemi Takip - ${vesselName}` : 'Gemi Takip'}
+      title={
+        vesselName ? t('vesselTracking.iframeTitle', { vesselName }) : t('vesselTracking.title')
+      }
       sandbox="allow-scripts allow-same-origin allow-popups"
       style={{ width: '100%', height, border: 'none', borderRadius: 8 }}
       src={buildMarineTrafficUrl(mmsi)}

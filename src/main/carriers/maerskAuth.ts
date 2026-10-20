@@ -1,4 +1,5 @@
 import { getCarrierCredentials } from './config'
+import { mt } from '../i18n/language'
 
 // Kaynak: https://developer.maersk.com/support/authorisation (Production Environment).
 const TOKEN_URL = 'https://api.maersk.com/customer-identity/oauth/v2/access_token'
@@ -28,7 +29,7 @@ export async function getMaerskAccessToken(): Promise<string> {
 
   const credentials = getCarrierCredentials('MAERSK')
   if (!credentials) {
-    throw new Error('Maersk API kimlik bilgileri (Consumer-Key/Secret) tanımlı değil.')
+    throw new Error(mt('errors.maerskCredentialsNotConfigured'))
   }
 
   const body = new URLSearchParams({

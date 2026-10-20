@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Container, ContainerInput, ContainerType } from '@shared/types'
-import { CONTAINER_TYPES, BOOKING_STATUS_LABELS } from '@shared/types'
+import { CONTAINER_TYPES } from '@shared/types'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
 import flags from 'react-phone-number-input/flags'
 import 'react-phone-number-input/style.css'
@@ -32,6 +33,7 @@ export default function ContainerFormModal({
   onClose,
   onSaved
 }: Props): React.JSX.Element {
+  const { t } = useTranslation()
   const [form, setForm] = useState<ContainerInput>(
     container
       ? {
@@ -65,29 +67,24 @@ export default function ContainerFormModal({
     const containerNo = (form.containerNo ?? '').trim()
     const sealNo = (form.sealNo ?? '').trim()
     const missingFields: string[] = []
-    if (!containerNo) missingFields.push('Konteyner No')
-    if (!sealNo) missingFields.push('Mühür (Seal No)')
+    if (!sealNo) missingFields.push(t('containers.sealFieldName'))
     if (missingFields.length > 0) {
-      setError(`Şu alanlar zorunludur: ${missingFields.join(', ')}.`)
+      setError(t('containers.requiredFieldsMessage', { fields: missingFields.join(', ') }))
       return
     }
 
     const driverPhone = form.driverPhone
     if (driverPhone && driverPhone.trim().length > 0 && !isValidPhoneNumber(driverPhone)) {
-      setPhoneError(
-        'Telefon numarası geçersiz. Ülke bayrağına tıklayıp seçin ve numarayı kontrol edin.'
-      )
+      setPhoneError(t('containers.phoneInvalid'))
       return
     }
 
     const conflicts = await window.api.containers.findConflicts(containerNo, container?.id)
     if (conflicts.length > 0) {
       const list = conflicts
-        .map((c) => `${c.bookingNo} (${BOOKING_STATUS_LABELS[c.bookingStatus]})`)
+        .map((c) => `${c.bookingNo} (${t(`enums.bookingStatus.${c.bookingStatus}`)})`)
         .join(', ')
-      const proceed = window.confirm(
-        `Uyarı: "${containerNo}" konteyner numarası zaten aktif başka booking'lerde kayıtlı: ${list}.\n\nBu mükerrer giriş insan hatası olabilir. Yine de kaydetmek istiyor musunuz?`
-      )
+      const proceed = window.confirm(t('containers.duplicateWarning', { containerNo, list }))
       if (!proceed) return
     }
 
@@ -108,34 +105,33 @@ export default function ContainerFormModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
-        <h2>{container ? 'Konteyner Düzenle' : 'Yeni Konteyner'}</h2>
+        <h2>{container ? t('containers.editTitle') : t('containers.newTitle')}</h2>
         <form onSubmit={handleSubmit}>
           <div className="form-grid">
             <div className="form-field">
-              <label>Konteyner No *</label>
+              <label>{t('containers.containerNo')}</label>
               <input
                 className="text-input"
                 value={form.containerNo ?? ''}
                 onChange={(e) => update('containerNo', e.target.value)}
-                required
               />
             </div>
             <div className="form-field">
-              <label>Tip *</label>
+              <label>{t('containers.typeRequired')}</label>
               <select
                 className="select-input"
                 value={form.type}
                 onChange={(e) => update('type', e.target.value as ContainerType)}
               >
-                {CONTAINER_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
+                {CONTAINER_TYPES.map((ct) => (
+                  <option key={ct} value={ct}>
+                    {ct}
                   </option>
                 ))}
               </select>
             </div>
             <div className="form-field">
-              <label>Mühür (Seal No) *</label>
+              <label>{t('containers.sealNoRequired')}</label>
               <input
                 className="text-input"
                 value={form.sealNo ?? ''}
@@ -144,7 +140,7 @@ export default function ContainerFormModal({
               />
             </div>
             <div className="form-field">
-              <label>Çekici</label>
+              <label>{t('containers.truckPlate')}</label>
               <input
                 className="text-input"
                 value={form.truckPlate ?? ''}
@@ -152,7 +148,7 @@ export default function ContainerFormModal({
               />
             </div>
             <div className="form-field">
-              <label>Dorse</label>
+              <label>{t('containers.trailerPlate')}</label>
               <input
                 className="text-input"
                 value={form.trailerPlate ?? ''}
@@ -160,7 +156,7 @@ export default function ContainerFormModal({
               />
             </div>
             <div className="form-field">
-              <label>Gemi Adı</label>
+              <label>{t('containers.vesselName')}</label>
               <input
                 className="text-input"
                 value={form.vesselName ?? ''}
@@ -168,31 +164,31 @@ export default function ContainerFormModal({
               />
             </div>
             <div className="form-field">
-              <label>IMO No</label>
+              <label>{t('containers.imoNo')}</label>
               <input
                 className="text-input"
-                placeholder="ör. 9506291"
+                placeholder={t('containers.imoPlaceholder')}
                 value={form.imoNumber ?? ''}
                 onChange={(e) => update('imoNumber', e.target.value)}
               />
             </div>
             <div className="form-field">
-              <label>MMSI No</label>
+              <label>{t('containers.mmsiNo')}</label>
               <input
                 className="text-input"
-                placeholder="ör. 224466900"
+                placeholder={t('containers.mmsiPlaceholder')}
                 value={form.mmsiNumber ?? ''}
                 onChange={(e) => update('mmsiNumber', e.target.value)}
               />
             </div>
             <div className="form-field">
-              <label>Telefon</label>
+              <label>{t('containers.phone')}</label>
               <PhoneInput
                 international
                 defaultCountry="TR"
                 flags={flags}
                 className="phone-input"
-                placeholder="Telefon numarası"
+                placeholder={t('containers.phonePlaceholder')}
                 value={form.driverPhone ?? ''}
                 onChange={(value) => update('driverPhone', value ?? '')}
               />
@@ -203,7 +199,7 @@ export default function ContainerFormModal({
               )}
             </div>
             <div className="form-field full">
-              <label>Durum / Not</label>
+              <label>{t('containers.statusNote')}</label>
               <textarea
                 className="textarea-input"
                 rows={2}
@@ -215,10 +211,10 @@ export default function ContainerFormModal({
           {error && <div className="form-error">{error}</div>}
           <div className="form-actions">
             <button type="button" className="btn secondary" onClick={onClose}>
-              İptal
+              {t('common.dismiss')}
             </button>
             <button type="submit" className="btn" disabled={saving}>
-              {saving ? 'Kaydediliyor...' : 'Kaydet'}
+              {saving ? t('auth.saving') : t('common.save')}
             </button>
           </div>
         </form>

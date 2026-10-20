@@ -1,17 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import type { Booking, Container, DocumentType } from '@shared/types'
-import {
-  DOCUMENT_TYPES,
-  DOCUMENT_TYPE_LABELS,
-  BOOKING_STATUS_LABELS,
-  ARCHIVABLE_BOOKING_STATUSES
-} from '@shared/types'
-import { formatDate, toWhatsAppLink } from '../lib/format'
+import { DOCUMENT_TYPES, ARCHIVABLE_BOOKING_STATUSES } from '@shared/types'
+import { formatDate, toWhatsAppLink, getErrorMessage } from '../lib/format'
 import ContainerFormModal from '../components/ContainerFormModal'
 import DocumentSection from '../components/DocumentSection'
 import VesselTrackingPanel from '../components/VesselTrackingPanel'
 import CarrierLookupModal from '../components/CarrierLookupModal'
+import { useAuth } from '../auth/AuthContext'
 import type { ContainerWithBooking } from '@shared/types'
 
 // GEÇİCİ: Armatörden Getir (resmi API + deneysel genel sayfa fallback'i) su an güvenilir
@@ -19,9 +16,12 @@ import type { ContainerWithBooking } from '@shared/types'
 const CARRIER_LOOKUP_ENABLED = false
 
 export default function BookingDetailPage(): React.JSX.Element {
+  const { t } = useTranslation()
   const { id } = useParams()
   const bookingId = Number(id)
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isCustomer = user?.role === 'CUSTOMER'
 
   const [booking, setBooking] = useState<Booking | null>(null)
   const [containers, setContainers] = useState<Container[]>([])
@@ -29,6 +29,12 @@ export default function BookingDetailPage(): React.JSX.Element {
   const [showContainerModal, setShowContainerModal] = useState(false)
   const [showCarrierModal, setShowCarrierModal] = useState(false)
   const [activeDocType, setActiveDocType] = useState<DocumentType>('BEYANNAME')
+  const [documentCounts, setDocumentCounts] = useState<Partial<Record<DocumentType, number>>>({})
+  const [docAddButton, setDocAddButton] = useState<{
+    onClick: () => void
+    disabled: boolean
+    label: string
+  } | null>(null)
 
   async function refresh(): Promise<void> {
     const [b, c] = await Promise.all([
@@ -39,13 +45,31 @@ export default function BookingDetailPage(): React.JSX.Element {
     setContainers(c)
   }
 
+  async function refreshDocumentCounts(): Promise<void> {
+    const all = await window.api.documents.listByBooking(bookingId)
+    const counts: Partial<Record<DocumentType, number>> = {}
+    for (const doc of all) {
+      counts[doc.type] = (counts[doc.type] ?? 0) + 1
+    }
+    setDocumentCounts(counts)
+  }
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh()
+    refreshDocumentCounts()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId])
 
   function openNewContainer(): void {
+    if (!booking) return
+    const unit = booking.unit ?? 0
+    if (containers.length >= unit) {
+      window.alert(
+        unit === 0 ? t('bookings.unitNotSetError') : t('bookings.maxUnitsReached', { unit })
+      )
+      return
+    }
     setEditingContainer(undefined)
     setShowContainerModal(true)
   }
@@ -56,7 +80,7 @@ export default function BookingDetailPage(): React.JSX.Element {
   }
 
   async function handleDeleteContainer(id: number): Promise<void> {
-    const confirmed = window.confirm('Bu konteyneri silmek istediğinize emin misiniz?')
+    const confirmed = window.confirm(t('bookings.confirmDeleteContainer'))
     if (!confirmed) return
     await window.api.containers.remove(id)
     await refresh()
@@ -68,107 +92,126 @@ export default function BookingDetailPage(): React.JSX.Element {
       await window.api.bookings.archive(booking.id, !booking.archived)
       await refresh()
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Arşivlenirken bir hata oluştu.')
+      window.alert(getErrorMessage(err, t('bookings.archiveErrorGeneric')))
     }
   }
 
   if (!booking) {
-    return <div className="empty-state">Yükleniyor...</div>
+    return <div className="empty-state">{t('common.loading')}</div>
   }
 
   return (
     <div>
       <div className="breadcrumb">
-        <Link to="/bookings">Bookingler</Link> / {booking.bookingNo}
+        <Link to="/bookings">{t('nav.bookings')}</Link> / {booking.bookingNo}
       </div>
       <div className="page-title">
         <h1>{booking.bookingNo}</h1>
         <div style={{ display: 'flex', gap: 8 }}>
-          {(booking.archived || ARCHIVABLE_BOOKING_STATUSES.includes(booking.status)) && (
-            <button className="btn secondary small" onClick={handleToggleArchive}>
-              {booking.archived ? 'Arşivden Çıkar' : 'Arşivle'}
-            </button>
-          )}
-          {CARRIER_LOOKUP_ENABLED && (
+          {!isCustomer &&
+            (booking.archived || ARCHIVABLE_BOOKING_STATUSES.includes(booking.status)) && (
+              <button className="btn secondary small" onClick={handleToggleArchive}>
+                {booking.archived ? t('archive.unarchiveButton') : t('bookings.archiveButton')}
+              </button>
+            )}
+          {!isCustomer && CARRIER_LOOKUP_ENABLED && (
             <button className="btn secondary small" onClick={() => setShowCarrierModal(true)}>
-              Armatörden Getir
+              {t('carriers.fetchFromCarrier')}
             </button>
           )}
-          <button
-            className="btn secondary small"
-            onClick={() => navigate(`/bookings/${booking.id}/edit`)}
-          >
-            Booking&apos;i Düzenle
-          </button>
+          {!isCustomer && (
+            <button
+              className="btn secondary small"
+              onClick={() => navigate(`/bookings/${booking.id}/edit`)}
+            >
+              {t('bookings.editBookingButton')}
+            </button>
+          )}
         </div>
       </div>
 
       <div className="detail-grid">
         <div className="surface">
           <div className="section-title">
-            <h2>Booking Bilgileri</h2>
+            <h2>{t('bookings.bookingInfoTitle')}</h2>
           </div>
           <div className="section-body form-grid">
             <div className="form-field">
-              <label>Vessel Departure</label>
+              <label>{t('reports.vesselDeparture')}</label>
               <div>{formatDate(booking.vesselDeparture) || '-'}</div>
             </div>
             <div className="form-field">
-              <label>Declaration Cut Off</label>
+              <label>{t('reports.declarationCutOff')}</label>
               <div>{formatDate(booking.declarationCutOff) || '-'}</div>
             </div>
             <div className="form-field">
-              <label>SI Cut Off</label>
+              <label>{t('reports.siCutOff')}</label>
               <div>{formatDate(booking.siCutOff) || '-'}</div>
             </div>
             <div className="form-field">
-              <label>Kategori</label>
+              <label>{t('bookings.category')}</label>
               <div>{booking.category || '-'}</div>
             </div>
             <div className="form-field">
-              <label>Destination</label>
+              <label>{t('reports.destination')}</label>
               <div>{booking.destination || '-'}</div>
             </div>
             <div className="form-field">
-              <label>Line</label>
+              <label>{t('reports.line')}</label>
               <div>{booking.line || '-'}</div>
             </div>
             <div className="form-field">
-              <label>POL</label>
+              <label>{t('reports.pol')}</label>
               <div>{booking.pol || '-'}</div>
             </div>
             <div className="form-field">
-              <label>Statü</label>
+              <label>{t('bookings.unit')}</label>
+              <div>
+                {booking.unit ?? 0}
+                <span className="text-muted">
+                  {' '}
+                  ({containers.length}/{booking.unit ?? 0})
+                </span>
+              </div>
+            </div>
+            <div className="form-field">
+              <label>{t('bookings.statusColumn')}</label>
               <div>
                 <span className={`badge badge-status-${booking.status.toLowerCase()}`}>
-                  {BOOKING_STATUS_LABELS[booking.status]}
+                  {t(`enums.bookingStatus.${booking.status}`)}
                 </span>
               </div>
             </div>
             <div className="form-field full">
-              <label>Durum / Not</label>
+              <label>{t('containers.statusNote')}</label>
               <div>{booking.notes || '-'}</div>
+            </div>
+            <div className="form-field full">
+              <label>{t('bookings.lastUpdatedBy')}</label>
+              <div className="text-muted">
+                {booking.updatedBy || '-'} · {formatDate(booking.updatedAt) || '-'}
+              </div>
             </div>
             {CARRIER_LOOKUP_ENABLED && (
               <>
                 <div className="form-field">
-                  <label>Konşimento (BL) No</label>
+                  <label>{t('enums.carrierReferenceType.BL')}</label>
                   <div>{booking.blNumber || '-'}</div>
                 </div>
                 <div className="form-field">
-                  <label>ETD (Armatör)</label>
+                  <label>ETD ({t('carriers.carrierLabel')})</label>
                   <div>{formatDate(booking.etd) || '-'}</div>
                 </div>
                 <div className="form-field">
-                  <label>ETA (Armatör)</label>
+                  <label>ETA ({t('carriers.carrierLabel')})</label>
                   <div>{formatDate(booking.eta) || '-'}</div>
                 </div>
                 <div className="form-field">
-                  <label>Free Time Bitiş</label>
+                  <label>{t('carriers.freeTimeEnd')}</label>
                   <div>{formatDate(booking.freeTimeEnd) || '-'}</div>
                 </div>
                 <div className="form-field full">
-                  <label>Konşimento Durumu</label>
+                  <label>{t('carriers.blStatus')}</label>
                   <div>{booking.blStatus || '-'}</div>
                 </div>
               </>
@@ -178,34 +221,40 @@ export default function BookingDetailPage(): React.JSX.Element {
 
         <div className="surface">
           <div className="section-title">
-            <h2>Konteynerler ({containers.length})</h2>
-          </div>
-          <div className="containers-toolbar">
-            <button className="btn small" onClick={openNewContainer}>
-              + Yeni Konteyner
-            </button>
+            <h2>
+              {t('bookings.containersTitle')} ({containers.length}/{booking.unit ?? 0})
+            </h2>
+            {!isCustomer && (
+              <button
+                className="btn small"
+                onClick={openNewContainer}
+                disabled={containers.length >= (booking.unit ?? 0)}
+              >
+                {t('bookings.newContainerButton')}
+              </button>
+            )}
           </div>
           <div className="table-scroll">
             {containers.length === 0 ? (
-              <div className="empty-state">Bu bookinge henüz konteyner eklenmedi.</div>
+              <div className="empty-state">{t('bookings.noContainersYet')}</div>
             ) : (
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Konteyner</th>
-                    <th>Tip</th>
-                    <th>Mühür</th>
-                    <th>Çekici</th>
-                    <th>Dorse</th>
-                    <th>Telefon</th>
-                    <th>Gemi</th>
-                    <th>Durum</th>
+                    <th>{t('bookings.containerColumn')}</th>
+                    <th>{t('reports.type')}</th>
+                    <th>{t('reports.seal')}</th>
+                    <th>{t('reports.truckPlate')}</th>
+                    <th>{t('reports.trailerPlate')}</th>
+                    <th>{t('unassignedVehicles.phone')}</th>
+                    <th>{t('reports.vessel')}</th>
+                    <th>{t('containers.statusNote')}</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {containers.map((c) => (
-                    <tr key={c.id} onClick={() => openEditContainer(c)}>
+                    <tr key={c.id} onClick={() => !isCustomer && openEditContainer(c)}>
                       <td>{c.containerNo}</td>
                       <td>
                         <span className={`badge badge-${c.type}`}>{c.type}</span>
@@ -220,7 +269,7 @@ export default function BookingDetailPage(): React.JSX.Element {
                             href={toWhatsAppLink(c.driverPhone) as string}
                             target="_blank"
                             rel="noopener noreferrer"
-                            title="WhatsApp'ta aç"
+                            title={t('bookings.whatsappOpenTitle')}
                           >
                             <svg
                               className="whatsapp-link__icon"
@@ -248,15 +297,17 @@ export default function BookingDetailPage(): React.JSX.Element {
                             className="btn secondary small"
                             style={{ marginRight: 6 }}
                           >
-                            Haritada Gör
+                            {t('bookings.viewOnMap')}
                           </Link>
                         )}
-                        <button
-                          className="btn danger small"
-                          onClick={() => handleDeleteContainer(c.id)}
-                        >
-                          Sil
-                        </button>
+                        {!isCustomer && (
+                          <button
+                            className="btn danger small"
+                            onClick={() => handleDeleteContainer(c.id)}
+                          >
+                            {t('common.delete')}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -268,25 +319,44 @@ export default function BookingDetailPage(): React.JSX.Element {
 
         <div className="surface">
           <div className="section-title">
-            <h2>Dökümanlar</h2>
+            <h2>{t('bookings.documentsTitle')}</h2>
+            {docAddButton && (
+              <button
+                className="btn small"
+                onClick={docAddButton.onClick}
+                disabled={docAddButton.disabled}
+              >
+                {docAddButton.label}
+              </button>
+            )}
           </div>
           <div className="doc-tabs">
-            {DOCUMENT_TYPES.map((t) => (
-              <div
-                key={t}
-                className={`doc-tab ${activeDocType === t ? 'active' : ''}`}
-                onClick={() => setActiveDocType(t)}
-              >
-                {DOCUMENT_TYPE_LABELS[t]}
-              </div>
-            ))}
+            {DOCUMENT_TYPES.map((docType) => {
+              const count = documentCounts[docType] ?? 0
+              return (
+                <div
+                  key={docType}
+                  className={`doc-tab ${activeDocType === docType ? 'active' : ''}`}
+                  onClick={() => setActiveDocType(docType)}
+                >
+                  {t(`enums.documentType.${docType}`)}
+                  {count > 0 && <span className="doc-tab__count">{count}</span>}
+                </div>
+              )
+            })}
           </div>
-          <DocumentSection bookingId={booking.id} type={activeDocType} />
+          <DocumentSection
+            bookingId={booking.id}
+            type={activeDocType}
+            onChange={refreshDocumentCounts}
+            onAddButtonChange={setDocAddButton}
+            readOnly={isCustomer}
+          />
         </div>
 
         <div className="surface">
           <div className="section-title">
-            <h2>Gemi Takip</h2>
+            <h2>{t('nav.vesselTracking')}</h2>
           </div>
           <div className="section-body">
             <VesselTrackingPanel

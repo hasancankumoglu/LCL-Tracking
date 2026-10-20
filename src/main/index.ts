@@ -1,42 +1,13 @@
-import { app, shell, BrowserWindow, ipcMain, protocol } from 'electron'
-import { join, normalize } from 'path'
-import { readFile } from 'fs/promises'
+import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { registerIpcHandlers } from './ipc/handlers'
-import { getDocumentsRoot } from './documents/storage'
-import { closeDb } from './db/schema'
 import { getBackupConfig } from './backup/config'
 import { runConfiguredBackup } from './backup/backup'
-
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: 'app-doc',
-    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
-  }
-])
-
-function registerDocumentProtocol(): void {
-  protocol.handle('app-doc', async (request) => {
-    const url = new URL(request.url)
-    const encodedPath = url.searchParams.get('path')
-    if (!encodedPath) return new Response('Not found', { status: 404 })
-
-    const requestedPath = normalize(decodeURIComponent(encodedPath))
-    const root = normalize(getDocumentsRoot())
-
-    if (!requestedPath.startsWith(root)) {
-      return new Response('Forbidden', { status: 403 })
-    }
-
-    try {
-      const data = await readFile(requestedPath)
-      return new Response(new Uint8Array(data))
-    } catch {
-      return new Response('Not found', { status: 404 })
-    }
-  })
-}
+import { runLegacyMigrationIfNeeded } from './migration/migrate'
+import { initAutoUpdate } from './update/autoUpdate'
+import { mt } from './i18n/language'
 
 function createWindow(): void {
   // Create the browser window.
@@ -45,7 +16,7 @@ function createWindow(): void {
     height: 800,
     show: false,
     autoHideMenuBar: true,
-    title: 'Konteyner Takip Sistemi',
+    title: `LCL-Tracking v${app.getVersion()}`,
     icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -55,6 +26,11 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
+  })
+
+  // index.html'in <title> etiketi sayfa yüklenince native pencere başlığını ezer - engelliyoruz.
+  mainWindow.on('page-title-updated', (event) => {
+    event.preventDefault()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -74,9 +50,9 @@ function createWindow(): void {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Set app user model id for windows
-  electronApp.setAppUserModelId('com.palmmarine.halilsportal')
+  electronApp.setAppUserModelId('com.palmmarine.lcltracking')
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
@@ -88,10 +64,26 @@ app.whenReady().then(() => {
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
 
-  registerDocumentProtocol()
+  // Eski (SQLite dönemi) local veri varsa buluta tek seferlik taşınır; başarısız olursa
+  // local veriye hiç dokunulmaz ve bir sonraki açılışta otomatik tekrar denenir.
+  try {
+    await runLegacyMigrationIfNeeded()
+  } catch (err) {
+    console.error('Bulut migrasyonu başarısız:', err)
+    dialog.showErrorBox(
+      mt('update.migrationErrorTitle'),
+      mt('errors.cloudMigrationFailed', {
+        message: err instanceof Error ? err.message : String(err)
+      })
+    )
+  }
+
   registerIpcHandlers()
 
   createWindow()
+
+  // Dev modda app-update.yml paketlenmediği için auto-update sadece gerçek build'de çalışır.
+  initAutoUpdate(!is.dev)
 
   // Açılışta arka planda en-iyi-çaba otomatik yedek (hata verse de uygulamayı bloklamaz/etkilemez).
   if (getBackupConfig().backupFolder) {
@@ -117,7 +109,6 @@ app.on('window-all-closed', () => {
 let quitBackupDone = false
 app.on('before-quit', (event) => {
   if (quitBackupDone || !getBackupConfig().backupFolder) {
-    closeDb()
     return
   }
 
@@ -126,7 +117,6 @@ app.on('before-quit', (event) => {
     .catch((err) => console.error('Kapanış öncesi yedekleme başarısız:', err))
     .finally(() => {
       quitBackupDone = true
-      closeDb()
       app.quit()
     })
 })

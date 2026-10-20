@@ -6,8 +6,54 @@
   height: 100vh;
 }
 
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: rgba(244, 246, 249, 0.85);
+  backdrop-filter: blur(2px);
+  animation: plm-fade-in 150ms ease-out;
+}
+
+.loading-overlay__spinner {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  animation: plm-spin 1.2s linear infinite;
+}
+
+.loading-overlay__text {
+  color: var(--color-navy);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+@keyframes plm-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes plm-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .app-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 14px;
   padding: 12px 24px;
@@ -90,6 +136,23 @@
   cursor: not-allowed;
 }
 
+/*
+ * Liste sayfası standardı (toolbar + kart):
+ * `.surface` varsayılan olarak iç boşluk (padding) İÇERMEZ; bu, tablo başlığı
+ * veya `.booking-category` gibi "köşeden köşeye" tasarımların kartın
+ * yuvarlatılmış kenarlarına tam oturabilmesi içindir.
+ * Bu yüzden arama kutusu / filtre / aksiyon butonu gibi elemanlar
+ * ASLA doğrudan `.surface` içine konmaz; her zaman `.toolbar` ile
+ * sayfa seviyesinde (kartın DIŞINDA) yer alır - bkz. BookingListPage,
+ * UsersAdminPage, CustomerManagementPage, PendingDeletionsPage.
+ * Tablo/empty-state içeriği ise ayrı bir `.surface.table-scroll` kartına
+ * konur. Serbest metin veya form alanlarını doğrudan bir kart içine
+ * koymak gerekiyorsa (örn. BackupPage, ReportsPage), `.surface` üstünde
+ * mutlaka açık bir padding belirtilmeli (örn. style={{ padding: 16 }})
+ * ya da `.section-title` / `.section-body` ikilisi kullanılmalı
+ * (bkz. BookingDetailPage) - aksi halde içerik kartın köşelerine yapışır.
+ */
+
 /* Toolbar */
 .toolbar {
   display: flex;
@@ -146,7 +209,7 @@
 
 /* Card / surface */
 .surface {
-  background: var(--color-surface);
+  background: var(--color-surface-translucent);
   border: 1px solid var(--color-border);
   border-radius: 10px;
 }
@@ -188,13 +251,74 @@
   background: var(--color-warning-bg);
 }
 
+.data-table tbody tr.row-completed {
+  background: var(--color-success-bg);
+}
+
 .data-table tbody tr.row-critical:hover,
+.data-table tbody tr.row-completed:hover,
 .data-table tbody tr.row-warning:hover {
   filter: brightness(0.97);
 }
 
 .table-scroll {
   overflow-x: auto;
+}
+
+.booking-list {
+  min-width: 0;
+  width: 100%;
+}
+
+.booking-list .toolbar > .search-input,
+.booking-list .toolbar > .select-input {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 150px;
+}
+
+.booking-list__table {
+  table-layout: fixed;
+}
+
+.booking-list__table th,
+.booking-list__table td {
+  padding: 8px 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.booking-list__table .badge,
+.booking-list__table .link-button,
+.booking-list__actions .btn {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.booking-list__table .badge {
+  padding: 3px 5px;
+  vertical-align: middle;
+}
+
+.booking-list__customer {
+  width: clamp(100px, 16vw, 180px);
+}
+
+.booking-list__actions-column {
+  width: 160px;
+}
+
+.booking-list__actions {
+  display: flex;
+  gap: 4px;
+}
+
+.booking-list__actions .btn {
+  justify-content: center;
+  padding: 5px;
 }
 
 .booking-category + .booking-category {
@@ -275,142 +399,6 @@
   color: var(--color-danger-text);
 }
 
-.badge.badge-docs-complete {
-  background: var(--color-success-bg);
-  color: var(--color-success-text);
-}
-
-.badge.badge-docs-missing {
-  background: var(--color-danger-bg);
-  color: var(--color-danger-text);
-  cursor: help;
-}
-
-/* WhatsApp link (container listesi telefon h\u00fccresi) */
-.whatsapp-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: #1e7d34;
-  text-decoration: none;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.whatsapp-link:hover {
-  text-decoration: underline;
-}
-
-.whatsapp-link__icon {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-/* Çoklu seçim dropdown (ör. rapor ekranında booking seçimi) */
-.multiselect {
-  position: relative;
-}
-
-.multiselect__trigger {
-  appearance: none;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.multiselect__trigger:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.multiselect__trigger-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.multiselect__chevron {
-  font-size: 10px;
-  color: var(--color-text-muted);
-  transition: transform 150ms;
-  flex-shrink: 0;
-}
-
-.multiselect__chevron.open {
-  transform: rotate(180deg);
-}
-
-.multiselect__panel {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  z-index: 20;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.multiselect__actions {
-  display: flex;
-  gap: 14px;
-  padding: 0 2px;
-}
-
-.multiselect__actions button {
-  appearance: none;
-  background: none;
-  border: none;
-  color: var(--color-navy);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 2px;
-}
-
-.multiselect__actions button:hover {
-  text-decoration: underline;
-}
-
-.multiselect__list {
-  max-height: 220px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.multiselect__option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.multiselect__option:hover {
-  background: #f0f4fb;
-}
-
-.multiselect__empty {
-  padding: 14px;
-  text-align: center;
-  color: var(--color-text-muted);
-  font-size: 13px;
-}
-
 /* Forms */
 .form-grid {
   display: grid;
@@ -473,26 +461,41 @@
   text-decoration: underline;
 }
 
-/* Rapor dönem filtresi (Hepsi/Bugün/Bu Hafta/Bu Ay/Bu Sene) */
+.text-muted {
+  color: var(--color-text-muted);
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-navy);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.link-button:hover {
+  color: var(--color-navy-dark);
+}
+
 .report-filter {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  margin-bottom: 14px;
 }
 
 .report-filter__btn {
   cursor: pointer;
-  border: 1px solid var(--color-border);
   background: #fff;
-  color: var(--color-text);
-  border-radius: 20px;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
   padding: 6px 14px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
-  transition:
-    background 150ms,
-    color 150ms,
-    border-color 150ms;
 }
 
 .report-filter__btn:hover {
@@ -505,26 +508,27 @@
   border-color: var(--color-navy);
 }
 
-/* Rapor/Dashboard KPI özet kartları */
 .dashboard-kpis {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
 .dashboard-kpi {
+  flex: 1;
+  min-width: 140px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-translucent);
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  padding: 14px 20px;
-  min-width: 140px;
 }
 
 .dashboard-kpi__value {
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--color-navy);
 }
@@ -580,6 +584,22 @@
   color: var(--color-navy);
   border-color: var(--color-border);
   border-bottom-color: var(--color-bg);
+}
+
+.doc-tab__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--color-red, #d64545);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .doc-gallery {
@@ -742,6 +762,45 @@
   max-width: 920px;
 }
 
+.app-update-dialog {
+  border: 1px solid var(--color-border);
+  margin: auto;
+  color: var(--color-text);
+}
+
+.app-update-dialog::backdrop {
+  background: rgba(10, 15, 25, 0.45);
+}
+
+.app-update-dialog p {
+  margin-bottom: 14px;
+}
+
+.app-update-dialog progress {
+  width: 100%;
+  height: 20px;
+  accent-color: var(--color-navy);
+  margin-bottom: 14px;
+}
+
+.app-update-dialog__notes {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  max-height: 30vh;
+  overflow-y: auto;
+  background: #f4f6f9;
+  padding: 14px;
+  border-radius: 6px;
+  margin: 12px 0 20px;
+}
+
+.app-update-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 /* Sürükle-bırak alanları (Excel içe aktarma, döküman ekleme) */
 .dropzone {
   border: 2px dashed var(--color-border);
@@ -848,12 +907,6 @@
   border-radius: 8px;
 }
 
-.containers-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  padding: 12px 16px 0;
-}
-
 .action a:hover {
   border-color: var(--ev-button-alt-hover-border);
   color: var(--ev-button-alt-hover-text);
@@ -906,35 +959,11 @@
   }
 }
 
-/* Header back button */
-.app-header__back {
-  appearance: none;
-  cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 7px 12px;
-  border-radius: 6px;
-  margin-left: 18px;
-  transition:
-    background 150ms,
-    opacity 150ms;
-}
-
-.app-header__back:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.app-header__back:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
 /* Header nav */
 .app-header__nav {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   margin-left: auto;
@@ -957,6 +986,213 @@
 .app-header__navlink.active {
   background: rgba(255, 255, 255, 0.18);
   color: #fff;
+}
+
+.app-header__dropdown {
+  position: relative;
+}
+
+.app-header__navlink--dropdown {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.app-header__navlink--dropdown::after {
+  content: '▾';
+  margin-left: 6px;
+  font-size: 10px;
+}
+
+.app-header__dropdown:hover .app-header__navlink--dropdown,
+.app-header__dropdown:focus-within .app-header__navlink--dropdown {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.app-header__dropdown-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  min-width: 180px;
+  background: #1c2a4a;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  z-index: 20;
+}
+
+.app-header__dropdown:hover .app-header__dropdown-menu,
+.app-header__dropdown:focus-within .app-header__dropdown-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-header__dropdown-item {
+  color: #cdd8ef;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.app-header__dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.app-header__dropdown-item.active {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.app-header__user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 14px;
+  padding-left: 14px;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.app-header__user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1.2;
+}
+
+.app-header__user-role {
+  font-size: 11px;
+  color: #cdd8ef;
+  line-height: 1.2;
+}
+
+.app-header__logout {
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.app-header__logout:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.language-switcher {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.language-switcher__flag {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 20px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  opacity: 0.45;
+  overflow: hidden;
+}
+
+.language-switcher__flag svg {
+  width: 100%;
+  height: 100%;
+}
+
+.language-switcher__flag:hover {
+  opacity: 0.75;
+}
+
+.language-switcher__flag--active {
+  opacity: 1;
+  border-color: var(--color-border);
+}
+
+.language-switcher--header .language-switcher__flag--active {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.language-switcher--login {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.auth-card {
+  position: relative;
+}
+
+/* Login / Şifre değiştirme - tam ekran, header'sız kart */
+.auth-screen {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  /* Foto: Haris Illahi (@harisillahi) on Unsplash, Unsplash License (free, commercial use ok) */
+  background: url('./login-background.jpg') no-repeat center center / cover;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 28px 28px 24px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.auth-card__logo {
+  display: block;
+  height: 48px;
+  width: 48px;
+  margin: 0 auto 14px;
+  object-fit: contain;
+}
+
+.auth-card h1 {
+  font-size: 18px;
+  text-align: center;
+  color: var(--color-navy);
+  margin-bottom: 4px;
+}
+
+.auth-card__subtitle {
+  font-size: 13px;
+  text-align: center;
+  color: var(--color-text-muted);
+  margin-bottom: 20px;
+}
+
+.auth-card .form-field {
+  margin-bottom: 14px;
+}
+
+.auth-card__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text);
+  margin: 2px 0 18px;
 }
 
 /* Status badges */
@@ -1082,11 +1318,15 @@
   margin-bottom: 20px;
 }
 
+.dashboard-grid--planning {
+  grid-template-columns: 360px 1fr;
+}
+
 .dashboard-card {
-  background: var(--color-surface);
+  padding: 16px;
+  background: var(--color-surface-translucent);
   border: 1px solid var(--color-border);
   border-radius: 10px;
-  padding: 16px;
 }
 
 .dashboard-card h3 {
@@ -1094,46 +1334,37 @@
   margin-bottom: 14px;
 }
 
-/* Dashboard daraltılabilir bölümler (Planlama / Raporlar) */
 .dashboard-section {
-  margin-bottom: 20px;
-}
-
-.dashboard-section:last-child {
-  margin-bottom: 0;
+  padding: 0;
 }
 
 .dashboard-section__header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 16px 20px;
+  gap: 8px;
+  padding: 14px 16px;
   cursor: pointer;
-  user-select: none;
 }
 
 .dashboard-section__header:hover {
-  background: #f4f7fc;
+  background: #f7f9fc;
 }
 
 .dashboard-section__header h2 {
+  margin: 0;
   font-size: 16px;
-  font-weight: 700;
 }
 
 .dashboard-section__toggle {
+  width: 12px;
   font-size: 12px;
   color: var(--color-text-muted);
-  width: 12px;
-  flex-shrink: 0;
 }
 
 .dashboard-section__body {
-  padding: 20px;
+  padding: 0 16px 16px;
   border-top: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  padding-top: 16px;
 }
 
 .pie-chart-row {
@@ -1190,6 +1421,10 @@
   color: var(--color-text-muted);
 }
 
+.bar-chart__label--wide {
+  width: 160px;
+}
+
 .bar-chart__track {
   flex: 1;
   background: var(--color-bg);
@@ -1222,11 +1457,6 @@
   padding-right: 4px;
 }
 
-.weekly-plan-scroll {
-  max-height: 360px;
-  overflow-y: auto;
-}
-
 .upcoming-item {
   display: flex;
   align-items: center;
@@ -1244,105 +1474,16 @@
 
 .upcoming-item.active {
   border-color: var(--color-navy);
-  background: #eaf0fb;
+  background: #e9f0fb;
 }
 
 .upcoming-item.disabled {
-  opacity: 0.5;
   cursor: not-allowed;
+  opacity: 0.55;
 }
 
-/* Gemi Takip sayfası: sayfanın kendisi kaymasın, sadece soldaki liste kaysın,
-   harita da kendine ayrılan alanı tamamen doldursun. */
-.vessel-tracking-page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.vessel-tracking-page .page-title {
-  flex-shrink: 0;
-}
-
-.vessel-tracking-page .detail-grid {
-  flex: 1;
-  min-height: 0;
-  grid-template-rows: 1fr;
-  overflow: hidden;
-}
-
-.vessel-tracking-page .detail-grid > .surface {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.vessel-tracking-page .detail-grid > .surface .section-body {
-  flex: 1;
-  min-height: 0;
-}
-
-.vessel-tracking-page .detail-grid > .surface:first-child .section-body {
-  overflow-y: auto;
-}
-
-.vessel-tree-search {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.vessel-tree-group + .vessel-tree-group {
-  border-top: 1px solid var(--color-border);
-}
-
-.vessel-tree-group__header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
-  cursor: pointer;
-}
-
-.vessel-tree-group__header:hover {
-  background: #f4f7fc;
-}
-
-.vessel-tree-group__caret {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  width: 10px;
-  flex-shrink: 0;
-}
-
-.vessel-tree-group__title-block {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.vessel-tree-group__bookingno {
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.vessel-tree-group__meta {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.vessel-tree-group__items {
-  padding: 4px 8px 8px 30px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.upcoming-item.disabled:hover {
+  background: transparent;
 }
 
 .upcoming-item__main {
@@ -1360,11 +1501,18 @@
   color: var(--color-text-muted);
 }
 
+.upcoming-item__date {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-navy);
+  white-space: nowrap;
+}
+
 .upcoming-item__summary {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 2px;
+  flex-wrap: wrap;
 }
 
 .upcoming-item__containers {
@@ -1372,9 +1520,267 @@
   color: var(--color-text-muted);
 }
 
-.upcoming-item__date {
-  font-size: 13px;
+.weekly-plan-scroll {
+  max-height: 420px;
+}
+
+/* Header back button */
+.app-header__back {
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--color-navy);
+  margin-left: 14px;
+}
+
+.app-header__back:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.app-header__back:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Raporlar - Booking çoklu seçim dropdown */
+.multiselect {
+  position: relative;
+}
+
+.multiselect__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+}
+
+.multiselect__trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.multiselect__chevron {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  transition: transform 150ms;
+}
+
+.multiselect__chevron.open {
+  transform: rotate(180deg);
+}
+
+.multiselect__panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.multiselect__actions {
+  display: flex;
+  gap: 10px;
+}
+
+.multiselect__actions button {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: var(--color-navy);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.multiselect__actions button:hover {
+  text-decoration: underline;
+}
+
+.multiselect__list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.multiselect__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.multiselect__option:hover {
+  background: #f0f4fb;
+}
+
+.multiselect__empty {
+  padding: 10px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+/* Gemi Takip sayfası - ağaç görünümü + harita bitmiş yükseklik */
+.vessel-tracking-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.vessel-tracking-page .detail-grid {
+  flex: 1;
+  min-height: 0;
+}
+
+.vessel-tracking-page .detail-grid > .surface {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.vessel-tree-search {
+  padding: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.vessel-tree {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vessel-tree-group {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.vessel-tree-group:last-child {
+  border-bottom: none;
+}
+
+.vessel-tree-group__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.vessel-tree-group__header:hover {
+  background: #f0f4fb;
+}
+
+.vessel-tree-group__caret {
+  width: 10px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.vessel-tree-group__title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.vessel-tree-group__bookingno {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.vessel-tree-group__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.vessel-tree-group__items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 12px 10px 28px;
+}
+
+/* WhatsApp linki (konteyner telefon numarası) */
+.whatsapp-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #1e7d34;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.whatsapp-link:hover {
+  text-decoration: underline;
+}
+
+.whatsapp-link__icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* Düz metin görünümlü link buton (Armatör API akışları) */
+.link-button {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-navy);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.link-button:hover {
+  color: var(--color-navy-dark);
+}
+
+.link-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.carrier-preview__changed {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  font-weight: 600;
+}
+
+.badge.badge-docs-complete {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.badge.badge-docs-missing {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
 }

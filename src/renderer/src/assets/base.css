@@ -4,6 +4,7 @@
   --color-red: #c1272d;
   --color-bg: #f4f6f9;
   --color-surface: #ffffff;
+  --color-surface-translucent: rgba(255, 255, 255, 0.6);
   --color-border: #dfe3ea;
   --color-text: #1c2430;
   --color-text-muted: #5b6472;
@@ -49,6 +50,17 @@ body {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* The image already contains its watermark opacity; keep it above opaque UI without blocking input. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  pointer-events: none;
+  background: url('./plm-watermark.png') no-repeat center center;
+  background-size: min(65vw, 760px);
 }
 
 button,

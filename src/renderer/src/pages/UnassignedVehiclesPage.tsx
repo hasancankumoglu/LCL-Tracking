@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import type {
   BookingWithStats,
   UnassignedVehicle,
   UnassignedVehicleInput,
+  UnassignedVehicleSelection,
   ContainerType
 } from '@shared/types'
 import { CONTAINER_TYPES } from '@shared/types'
+import { getErrorMessage } from '../lib/format'
+import { useGlobalLoading } from '../lib/loadingOverlay'
+import { useAuth } from '../auth/AuthContext'
+import { BookingForm } from './BookingFormPage'
 
 function normalizeToContainerType(raw: string | null): ContainerType {
   const value = (raw ?? '').trim().toUpperCase()
@@ -42,15 +49,23 @@ type NewVehicleForm = typeof emptyNewVehicleForm
  * bir konteyner olarak görünür ve bu listeden kalkar.
  */
 export default function UnassignedVehiclesPage(): React.JSX.Element {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const { hasPermission } = useAuth()
   const [vehicles, setVehicles] = useState<UnassignedVehicle[]>([])
   const [bookings, setBookings] = useState<BookingWithStats[]>([])
   const [loading, setLoading] = useState(true)
+  useGlobalLoading(loading)
   const [rowState, setRowState] = useState<Record<number, RowState>>({})
   const [assigningId, setAssigningId] = useState<number | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [showNewForm, setShowNewForm] = useState(false)
   const [newVehicle, setNewVehicle] = useState<NewVehicleForm>(emptyNewVehicleForm)
   const [creating, setCreating] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [bookingVehicles, setBookingVehicles] = useState<UnassignedVehicleSelection[] | null>(null)
+  const canCreateBooking =
+    hasPermission('bookings.manage') && hasPermission('unassigned_vehicles.manage')
 
   async function refresh(): Promise<void> {
     setLoading(true)
@@ -59,6 +74,7 @@ export default function UnassignedVehiclesPage(): React.JSX.Element {
       window.api.bookings.list()
     ])
     setVehicles(v)
+    setSelectedIds((prev) => prev.filter((id) => v.some((vehicle) => vehicle.id === id)))
     setBookings(b)
     setRowState((prev) => {
       const next: Record<number, RowState> = {}
@@ -83,15 +99,25 @@ export default function UnassignedVehiclesPage(): React.JSX.Element {
     setRowState((prev) => ({ ...prev, [id]: { ...prev[id], [key]: value } }))
   }
 
+  function openBookingModal(): void {
+    setBookingVehicles(
+      vehicles
+        .filter((vehicle) => selectedIds.includes(vehicle.id))
+        .map((vehicle) => ({
+          id: vehicle.id,
+          containerNo: rowState[vehicle.id].containerNo.trim() || null,
+          type: rowState[vehicle.id].type
+        }))
+    )
+  }
+
   async function handleAssign(vehicle: UnassignedVehicle): Promise<void> {
     const state = rowState[vehicle.id]
     if (!state) return
     const bookingNo = state.bookingNoInput.trim()
     const booking = bookings.find((b) => b.bookingNo.toLowerCase() === bookingNo.toLowerCase())
     if (!booking) {
-      window.alert(
-        `"${bookingNo}" numaralı booking bulunamadı. Lütfen listeden geçerli bir booking seçin.`
-      )
+      window.alert(t('unassignedVehicles.bookingNotFound', { bookingNo }))
       return
     }
     setAssigningId(vehicle.id)
@@ -102,18 +128,21 @@ export default function UnassignedVehiclesPage(): React.JSX.Element {
         type: state.type
       })
       setMessage(
-        `"${vehicle.truckPlate ?? 'Kayıt'}" artık "${booking.bookingNo}" booking'inin konteyner listesinde görünüyor.`
+        t('unassignedVehicles.assignedMessage', {
+          name: vehicle.truckPlate ?? t('unassignedVehicles.defaultRecordName'),
+          bookingNo: booking.bookingNo
+        })
       )
       await refresh()
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Atama sırasında bir hata oluştu.')
+      window.alert(getErrorMessage(err, t('unassignedVehicles.assignErrorGeneric')))
     } finally {
       setAssigningId(null)
     }
   }
 
   async function handleDelete(id: number): Promise<void> {
-    const confirmed = window.confirm('Bu kaydı silmek istediğinize emin misiniz?')
+    const confirmed = window.confirm(t('unassignedVehicles.confirmDelete'))
     if (!confirmed) return
     await window.api.unassignedVehicles.remove(id)
     await refresh()
@@ -129,7 +158,7 @@ export default function UnassignedVehiclesPage(): React.JSX.Element {
   async function handleCreate(): Promise<void> {
     const truckPlate = newVehicle.truckPlate.trim()
     if (!truckPlate) {
-      window.alert('Lütfen en az çekici plakasını girin.')
+      window.alert(t('unassignedVehicles.truckPlateRequiredAlert'))
       return
     }
     setCreating(true)
@@ -150,10 +179,10 @@ export default function UnassignedVehiclesPage(): React.JSX.Element {
       await window.api.unassignedVehicles.create(input)
       setNewVehicle(emptyNewVehicleForm)
       setShowNewForm(false)
-      setMessage('Yeni kayıt eklendi.')
+      setMessage(t('unassignedVehicles.recordAdded'))
       await refresh()
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Kayıt eklenirken bir hata oluştu.')
+      window.alert(getErrorMessage(err, t('unassignedVehicles.createErrorGeneric')))
     } finally {
       setCreating(false)
     }
@@ -162,17 +191,29 @@ export default function UnassignedVehiclesPage(): React.JSX.Element {
   return (
     <div>
       <div className="page-title" style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <h1>Atanmayan Araçlar</h1>
+        <h1>{t('nav.unassignedVehicles')}</h1>
         <button type="button" className="btn small" onClick={() => setShowNewForm((prev) => !prev)}>
-          {showNewForm ? 'Vazgeç' : '+ Yeni Ekle'}
+          {showNewForm ? t('common.cancel') : t('unassignedVehicles.addButton')}
         </button>
       </div>
 
       <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 14 }}>
-        Excel içe aktarımında booking veya konteyner numarası net belli olmayan araç kayıtları
-        burada listelenir. Her kayıt için bir booking seçip &quot;Ata&quot; butonuna basarak ilgili
-        booking&apos;e konteyner olarak ekleyebilirsiniz.
+        {t('unassignedVehicles.explainer')}
       </div>
+
+      {canCreateBooking && selectedIds.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <span>{t('unassignedVehicles.selectedCount', { count: selectedIds.length })}</span>
+          <button
+            type="button"
+            className="btn"
+            onClick={openBookingModal}
+            disabled={loading || assigningId !== null}
+          >
+            {t('unassignedVehicles.linkNewBooking')}
+          </button>
+        </div>
+      )}
 
       {showNewForm && (
         <div
@@ -194,43 +235,43 @@ export default function UnassignedVehiclesPage(): React.JSX.Element {
           >
             <input
               className="text-input"
-              placeholder="Çekici Plakası *"
+              placeholder={t('unassignedVehicles.truckPlateRequired')}
               value={newVehicle.truckPlate}
               onChange={(e) => updateNewVehicle('truckPlate', e.target.value)}
             />
             <input
               className="text-input"
-              placeholder="Telefon"
+              placeholder={t('unassignedVehicles.phone')}
               value={newVehicle.driverPhone}
               onChange={(e) => updateNewVehicle('driverPhone', e.target.value)}
             />
             <input
               className="text-input"
-              placeholder="Konum"
+              placeholder={t('unassignedVehicles.location')}
               value={newVehicle.location}
               onChange={(e) => updateNewVehicle('location', e.target.value)}
             />
             <input
               className="text-input"
-              placeholder="Acente"
+              placeholder={t('unassignedVehicles.agent')}
               value={newVehicle.agent}
               onChange={(e) => updateNewVehicle('agent', e.target.value)}
             />
             <input
               className="text-input"
-              placeholder="Mühür"
+              placeholder={t('unassignedVehicles.seal')}
               value={newVehicle.sealNo}
               onChange={(e) => updateNewVehicle('sealNo', e.target.value)}
             />
             <input
               className="text-input"
-              placeholder="BL / Kaynak Referans"
+              placeholder={t('unassignedVehicles.sourceRef')}
               value={newVehicle.sourceBookingRef}
               onChange={(e) => updateNewVehicle('sourceBookingRef', e.target.value)}
             />
             <input
               className="text-input"
-              placeholder="Konteyner No"
+              placeholder={t('unassignedVehicles.containerNo')}
               value={newVehicle.containerNo}
               onChange={(e) => updateNewVehicle('containerNo', e.target.value)}
             />
@@ -248,13 +289,13 @@ export default function UnassignedVehiclesPage(): React.JSX.Element {
           </div>
           <input
             className="text-input"
-            placeholder="Not"
+            placeholder={t('unassignedVehicles.note')}
             value={newVehicle.notes}
             onChange={(e) => updateNewVehicle('notes', e.target.value)}
           />
           <div>
             <button type="button" className="btn small" onClick={handleCreate} disabled={creating}>
-              {creating ? 'Ekleniyor...' : 'Kaydet'}
+              {creating ? t('unassignedVehicles.adding') : t('common.save')}
             </button>
           </div>
         </div>
@@ -273,24 +314,42 @@ export default function UnassignedVehiclesPage(): React.JSX.Element {
       </datalist>
 
       <div className="surface table-scroll">
-        {loading ? (
-          <div className="empty-state">Yükleniyor...</div>
-        ) : vehicles.length === 0 ? (
-          <div className="empty-state">Atanmamış araç kaydı yok.</div>
+        {loading ? null : vehicles.length === 0 ? (
+          <div className="empty-state">{t('unassignedVehicles.emptyList')}</div>
         ) : (
           <table className="data-table">
             <thead>
               <tr>
-                <th>Çekici</th>
-                <th>Telefon</th>
-                <th>Konum</th>
-                <th>Acente</th>
-                <th>Mühür</th>
-                <th>Not</th>
-                <th>BL / Kaynak Referans</th>
-                <th>Booking</th>
-                <th>Konteyner No</th>
-                <th>Tip</th>
+                {canCreateBooking && (
+                  <th>
+                    <input
+                      type="checkbox"
+                      aria-label={t('common.selectAll')}
+                      checked={vehicles.length > 0 && selectedIds.length === vehicles.length}
+                      ref={(element) => {
+                        if (element) {
+                          element.indeterminate =
+                            selectedIds.length > 0 && selectedIds.length < vehicles.length
+                        }
+                      }}
+                      onChange={(e) =>
+                        setSelectedIds(
+                          e.target.checked ? vehicles.map((vehicle) => vehicle.id) : []
+                        )
+                      }
+                    />
+                  </th>
+                )}
+                <th>{t('unassignedVehicles.truckPlateRequired').replace(' *', '')}</th>
+                <th>{t('unassignedVehicles.phone')}</th>
+                <th>{t('unassignedVehicles.location')}</th>
+                <th>{t('unassignedVehicles.agent')}</th>
+                <th>{t('unassignedVehicles.seal')}</th>
+                <th>{t('unassignedVehicles.note')}</th>
+                <th>{t('unassignedVehicles.sourceRef')}</th>
+                <th>{t('bookings.bookingColumn')}</th>
+                <th>{t('unassignedVehicles.containerNo')}</th>
+                <th>{t('reports.type')}</th>
                 <th></th>
               </tr>
             </thead>
@@ -300,6 +359,22 @@ export default function UnassignedVehiclesPage(): React.JSX.Element {
                 if (!state) return null
                 return (
                   <tr key={v.id}>
+                    {canCreateBooking && (
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={t('unassignedVehicles.selectVehicle', {
+                            name: v.truckPlate ?? v.id
+                          })}
+                          checked={selectedIds.includes(v.id)}
+                          onChange={(e) =>
+                            setSelectedIds((prev) =>
+                              e.target.checked ? [...prev, v.id] : prev.filter((id) => id !== v.id)
+                            )
+                          }
+                        />
+                      </td>
+                    )}
                     <td>{v.truckPlate ?? '-'}</td>
                     <td>{v.driverPhone ?? '-'}</td>
                     <td>{v.location ?? '-'}</td>
@@ -311,7 +386,7 @@ export default function UnassignedVehiclesPage(): React.JSX.Element {
                       <input
                         className="text-input"
                         list="unassigned-vehicles-booking-options"
-                        placeholder="Booking no"
+                        placeholder={t('unassignedVehicles.bookingNoPlaceholder')}
                         value={state.bookingNoInput}
                         onChange={(e) => updateRow(v.id, 'bookingNoInput', e.target.value)}
                         style={{ minWidth: 140 }}
@@ -320,7 +395,7 @@ export default function UnassignedVehiclesPage(): React.JSX.Element {
                     <td>
                       <input
                         className="text-input"
-                        placeholder="Konteyner no"
+                        placeholder={t('unassignedVehicles.containerNoPlaceholder')}
                         value={state.containerNo}
                         onChange={(e) => updateRow(v.id, 'containerNo', e.target.value)}
                         style={{ minWidth: 120 }}
@@ -346,10 +421,12 @@ export default function UnassignedVehiclesPage(): React.JSX.Element {
                           onClick={() => handleAssign(v)}
                           disabled={assigningId === v.id}
                         >
-                          {assigningId === v.id ? 'Atanıyor...' : 'Ata'}
+                          {assigningId === v.id
+                            ? t('unassignedVehicles.assigning')
+                            : t('unassignedVehicles.assignButton')}
                         </button>
                         <button className="btn secondary small" onClick={() => handleDelete(v.id)}>
-                          Sil
+                          {t('common.delete')}
                         </button>
                       </div>
                     </td>
@@ -360,6 +437,29 @@ export default function UnassignedVehiclesPage(): React.JSX.Element {
           </table>
         )}
       </div>
+      {bookingVehicles && (
+        <div className="modal-overlay">
+          <div
+            className="modal-panel modal-panel--wide"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-booking-modal-title"
+          >
+            <h2 id="new-booking-modal-title">{t('bookingForm.newBookingTitle')}</h2>
+            <p style={{ marginBottom: 14 }}>
+              {t('unassignedVehicles.newBookingHint', { count: bookingVehicles.length })}
+            </p>
+            <BookingForm
+              vehicles={bookingVehicles}
+              onCancel={() => setBookingVehicles(null)}
+              onSaved={(booking) => {
+                setBookingVehicles(null)
+                navigate(`/bookings/${booking.id}`)
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

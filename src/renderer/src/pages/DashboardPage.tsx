@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import type {
   BookingWithStats,
   DashboardStats,
@@ -8,17 +9,21 @@ import type {
   ReportBreakdownRow,
   ReportRange
 } from '@shared/types'
-import {
-  BOOKING_STATUSES,
-  BOOKING_STATUS_LABELS,
-  CONTAINER_TYPES,
-  REPORT_RANGES,
-  REPORT_RANGE_LABELS
-} from '@shared/types'
+import { BOOKING_STATUSES, CONTAINER_TYPES, REPORT_RANGES } from '@shared/types'
 import { formatDate } from '../lib/format'
+import { useGlobalLoading } from '../lib/loadingOverlay'
 import MissingDocsBadge from '../components/MissingDocsBadge'
+import { useAuth } from '../auth/AuthContext'
 
-const WEEKDAY_LABELS = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar']
+const WEEKDAY_KEYS = [
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday',
+  'sunday'
+] as const
 
 function isoDateOnly(d: Date): string {
   const year = d.getFullYear()
@@ -59,6 +64,7 @@ function StatusPieChart({
 }: {
   statusCounts: Record<BookingStatus, number>
 }): React.JSX.Element {
+  const { t } = useTranslation()
   const total = BOOKING_STATUSES.reduce((sum, s) => sum + statusCounts[s], 0)
 
   const gradient = useMemo(() => {
@@ -84,7 +90,7 @@ function StatusPieChart({
           <div key={s} className="pie-chart-legend__item">
             <span className="pie-chart-legend__swatch" style={{ background: STATUS_COLORS[s] }} />
             <span>
-              {BOOKING_STATUS_LABELS[s]}: <strong>{statusCounts[s]}</strong>
+              {t(`enums.bookingStatus.${s}`)}: <strong>{statusCounts[s]}</strong>
             </span>
           </div>
         ))}
@@ -123,8 +129,9 @@ function ContainerTypeBarChart({
 
 /** Hat / liman gibi serbest metin kırılımlarını (en çoktan aza) yatay çubuk grafik olarak gösterir. */
 function BreakdownBarChart({ data }: { data: ReportBreakdownRow[] }): React.JSX.Element {
+  const { t } = useTranslation()
   if (data.length === 0) {
-    return <div className="empty-state">Seçili dönem için veri yok.</div>
+    return <div className="empty-state">{t('dashboard.noDataForPeriod')}</div>
   }
   const max = Math.max(1, ...data.map((d) => d.count))
   return (
@@ -152,11 +159,14 @@ function BreakdownBarChart({ data }: { data: ReportBreakdownRow[] }): React.JSX.
 
 function WeeklyOperationsPlanner({
   weeklyPlan,
-  onStatusChange
+  onStatusChange,
+  readOnly
 }: {
   weeklyPlan: BookingWithStats[]
   onStatusChange: (booking: BookingWithStats, status: BookingStatus) => void
+  readOnly?: boolean
 }): React.JSX.Element {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const weekDates = useMemo(() => getCurrentWeekDates(), [])
   const todayOffset = useMemo(() => (new Date().getDay() + 6) % 7, [])
@@ -190,7 +200,7 @@ function WeeklyOperationsPlanner({
               className={`week-tab${i === activeTab ? ' active' : ''}`}
               onClick={() => setActiveTab(i)}
             >
-              <span className="week-tab__day">{WEEKDAY_LABELS[i]}</span>
+              <span className="week-tab__day">{t(`dashboard.weekdays.${WEEKDAY_KEYS[i]}`)}</span>
               <span className="week-tab__date">{formatDate(dateStr)}</span>
               {count > 0 && <span className="week-tab__count">{count}</span>}
             </button>
@@ -199,19 +209,19 @@ function WeeklyOperationsPlanner({
       </div>
 
       {rows.length === 0 ? (
-        <div className="empty-state">Bu gün için planlanmış booking yok.</div>
+        <div className="empty-state">{t('dashboard.noPlannedToday')}</div>
       ) : (
         <div className="table-scroll weekly-plan-scroll">
           <table className="data-table">
             <thead>
               <tr>
-                <th>Liman</th>
+                <th>{t('dashboard.portColumn')}</th>
                 <th>Booking No</th>
-                <th>Konteyner Tipi</th>
-                <th>Yükleme Statüsü</th>
-                <th>Hedef Liman</th>
-                <th>Evrak</th>
-                <th>Operasyon Notu / Sorumlu</th>
+                <th>{t('dashboard.containerTypeColumn')}</th>
+                <th>{t('dashboard.loadingStatusColumn')}</th>
+                <th>{t('dashboard.destinationPortColumn')}</th>
+                <th>{t('bookings.docsColumn')}</th>
+                <th>{t('dashboard.operationNoteColumn')}</th>
               </tr>
             </thead>
             <tbody>
@@ -223,17 +233,23 @@ function WeeklyOperationsPlanner({
                   </td>
                   <td>{b.containerSizes || '-'}</td>
                   <td onClick={(e) => e.stopPropagation()}>
-                    <select
-                      className={`status-select status-select--${b.status.toLowerCase()}`}
-                      value={b.status}
-                      onChange={(e) => onStatusChange(b, e.target.value as BookingStatus)}
-                    >
-                      {BOOKING_STATUSES.map((s) => (
-                        <option key={s} value={s}>
-                          {BOOKING_STATUS_LABELS[s]}
-                        </option>
-                      ))}
-                    </select>
+                    {readOnly ? (
+                      <span className={`badge badge-status-${b.status.toLowerCase()}`}>
+                        {t(`enums.bookingStatus.${b.status}`)}
+                      </span>
+                    ) : (
+                      <select
+                        className={`status-select status-select--${b.status.toLowerCase()}`}
+                        value={b.status}
+                        onChange={(e) => onStatusChange(b, e.target.value as BookingStatus)}
+                      >
+                        {BOOKING_STATUSES.map((s) => (
+                          <option key={s} value={s}>
+                            {t(`enums.bookingStatus.${s}`)}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </td>
                   <td>{b.destination || '-'}</td>
                   <td>
@@ -276,9 +292,12 @@ function CollapsibleSection({
 }
 
 export default function DashboardPage(): React.JSX.Element {
+  const { t } = useTranslation()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
+  useGlobalLoading(loading)
   const [range, setRange] = useState<ReportRange>('all')
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
 
@@ -318,12 +337,14 @@ export default function DashboardPage(): React.JSX.Element {
       status,
       archived: booking.archived,
       notes: booking.notes,
+      unit: booking.unit,
       blNumber: booking.blNumber,
       eta: booking.eta,
       etd: booking.etd,
       blStatus: booking.blStatus,
       freeTimeEnd: booking.freeTimeEnd,
-      lastCarrierSyncAt: booking.lastCarrierSyncAt
+      lastCarrierSyncAt: booking.lastCarrierSyncAt,
+      customerId: booking.customerId
     })
     await refresh(range)
   }
@@ -341,24 +362,22 @@ export default function DashboardPage(): React.JSX.Element {
   return (
     <div>
       <div className="page-title">
-        <h1>Dashboard</h1>
+        <h1>{t('nav.dashboard')}</h1>
       </div>
 
-      {loading || !stats ? (
-        <div className="empty-state">Yükleniyor...</div>
-      ) : (
+      {loading || !stats ? null : (
         <>
           <CollapsibleSection
             id="planlama"
-            title="Planlama"
+            title={t('dashboard.planningTitle')}
             collapsed={collapsedSections.has('planlama')}
             onToggle={toggleSection}
           >
             <div className="dashboard-grid dashboard-grid--planning">
               <div className="dashboard-card">
-                <h3>Yaklaşan Bookingler (7 gün)</h3>
+                <h3>{t('dashboard.upcomingBookingsTitle')}</h3>
                 {stats.upcoming.length === 0 ? (
-                  <div className="empty-state">Gelecek hafta için planlanmış booking yok.</div>
+                  <div className="empty-state">{t('dashboard.noUpcomingWeek')}</div>
                 ) : (
                   <div className="upcoming-list">
                     {stats.upcoming.map((b) => (
@@ -374,10 +393,10 @@ export default function DashboardPage(): React.JSX.Element {
                           </span>
                           <span className="upcoming-item__summary">
                             <span className={`badge badge-status-${b.status.toLowerCase()}`}>
-                              {BOOKING_STATUS_LABELS[b.status]}
+                              {t(`enums.bookingStatus.${b.status}`)}
                             </span>
                             <span className="upcoming-item__containers">
-                              {b.containerCount} konteyner
+                              {b.containerCount} {t('reports.containerCountSuffix')}
                               {b.containerSizes ? ` (${b.containerSizes})` : ''}
                             </span>
                           </span>
@@ -389,10 +408,11 @@ export default function DashboardPage(): React.JSX.Element {
                 )}
               </div>
               <div className="dashboard-card">
-                <h3>Haftalık Operasyon Planlama Tablosu</h3>
+                <h3>{t('dashboard.weeklyPlannerTitle')}</h3>
                 <WeeklyOperationsPlanner
                   weeklyPlan={stats.weeklyPlan}
                   onStatusChange={handleStatusChange}
+                  readOnly={user?.role === 'CUSTOMER'}
                 />
               </div>
             </div>
@@ -400,7 +420,7 @@ export default function DashboardPage(): React.JSX.Element {
 
           <CollapsibleSection
             id="raporlar"
-            title="Raporlar"
+            title={t('nav.reports')}
             collapsed={collapsedSections.has('raporlar')}
             onToggle={toggleSection}
           >
@@ -412,7 +432,7 @@ export default function DashboardPage(): React.JSX.Element {
                   className={`report-filter__btn${range === r ? ' active' : ''}`}
                   onClick={() => setRange(r)}
                 >
-                  {REPORT_RANGE_LABELS[r]}
+                  {t(`enums.reportRange.${r}`)}
                 </button>
               ))}
             </div>
@@ -420,35 +440,47 @@ export default function DashboardPage(): React.JSX.Element {
             <div className="dashboard-kpis">
               <div className="dashboard-kpi">
                 <span className="dashboard-kpi__value">{totalBookings}</span>
-                <span className="dashboard-kpi__label">Toplam Booking</span>
+                <span className="dashboard-kpi__label">{t('reports.totalBookings')}</span>
               </div>
               <div className="dashboard-kpi">
                 <span className="dashboard-kpi__value">{activeBookings}</span>
-                <span className="dashboard-kpi__label">Aktif Booking</span>
+                <span className="dashboard-kpi__label">{t('dashboard.activeBookingsKpi')}</span>
               </div>
               <div className="dashboard-kpi">
                 <span className="dashboard-kpi__value">{totalContainers}</span>
-                <span className="dashboard-kpi__label">Toplam Konteyner</span>
+                <span className="dashboard-kpi__label">{t('reports.totalContainers')}</span>
               </div>
             </div>
 
             <div className="dashboard-grid">
               <div className="dashboard-card">
-                <h3>Booking Statü Dağılımı</h3>
+                <h3>{t('dashboard.bookingStatusDistribution')}</h3>
                 <StatusPieChart statusCounts={stats.statusCounts} />
               </div>
               <div className="dashboard-card">
-                <h3>Konteyner Tipi Dağılımı</h3>
+                <h3>{t('reports.containerTypeDistribution')}</h3>
                 <ContainerTypeBarChart containerTypeCounts={stats.containerTypeCounts} />
               </div>
               <div className="dashboard-card">
-                <h3>Hat Dağılımı</h3>
+                <h3>{t('dashboard.lineDistributionTitle')}</h3>
                 <BreakdownBarChart data={stats.lineCounts} />
               </div>
               <div className="dashboard-card">
-                <h3>Yükleme Limanı Dağılımı</h3>
+                <h3>{t('dashboard.polDistributionTitle')}</h3>
                 <BreakdownBarChart data={stats.polCounts} />
               </div>
+              {user?.role !== 'CUSTOMER' && (
+                <>
+                  <div className="dashboard-card">
+                    <h3>{t('dashboard.customerBookingDistributionTitle')}</h3>
+                    <BreakdownBarChart data={stats.customerBookingCounts} />
+                  </div>
+                  <div className="dashboard-card">
+                    <h3>{t('dashboard.customerContainerDistributionTitle')}</h3>
+                    <BreakdownBarChart data={stats.customerContainerCounts} />
+                  </div>
+                </>
+              )}
             </div>
           </CollapsibleSection>
         </>

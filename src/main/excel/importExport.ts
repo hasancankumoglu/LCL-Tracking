@@ -18,14 +18,16 @@ import type {
   ExcelPreviewResult,
   BookingStatus
 } from '../../shared/types'
-import { CONTAINER_TYPES, BOOKING_STATUSES, BOOKING_STATUS_LABELS } from '../../shared/types'
+import { CONTAINER_TYPES, BOOKING_STATUSES } from '../../shared/types'
+import { mt, mtTr } from '../i18n/language'
 
 const UNCATEGORIZED_SHEET = 'Diğer'
 const BOOKINGS_FILE_NAME = 'Bookings.xlsx'
 const CONTAINERS_FILE_NAME = 'Containers.xlsx'
 
+// İçe aktarma her zaman Türkçe statu etiketleriyle çalışır (dil tercihinden bağımsız).
 const STATUS_LABEL_TO_CODE = new Map<string, BookingStatus>(
-  BOOKING_STATUSES.map((status) => [BOOKING_STATUS_LABELS[status].toLowerCase(), status])
+  BOOKING_STATUSES.map((status) => [mtTr(`enums.bookingStatus.${status}`).toLowerCase(), status])
 )
 
 function statusLabelToCode(raw: unknown): BookingStatus {
@@ -85,11 +87,21 @@ function groupByCategory(bookings: BookingWithStats[]): Map<string, BookingWithS
  * Bookinglari ve konteynerları, kaynak Excel dosyalarındaki gibi İKİ AYRI dosyaya
  * (Bookings.xlsx / Containers.xlsx) ve her biri içinde hedef/kategoriye göre
  * ayrı sekmelere (ör. Mundra, Bandar Abbas) bölerek dışa aktarır.
+ *
+ * `bookingIds` verildiğinde (BookingListPage'de uygulanan arama/filtre sonucu),
+ * sadece bu ID'lere sahip bookingler dışa aktarılır; tüm bookinglerin
+ * aktarılmaması bu parametreyle sağlanır.
  */
-export function exportToExcel(directoryPath: string): ExcelExportResult {
+export async function exportToExcel(
+  directoryPath: string,
+  bookingIds?: number[]
+): Promise<ExcelExportResult> {
   fs.mkdirSync(directoryPath, { recursive: true })
 
-  const bookings = listBookings(true)
+  const allBookings = await listBookings(true)
+  // bookingIds verildiğinde (ör. listede uygulanan filtreler) sadece o bookingler
+  // dışa aktarılır; aksi halde (ör. geriye dönük uyumluluk) tüm bookingler aktarılır.
+  const bookings = bookingIds ? allBookings.filter((b) => bookingIds.includes(b.id)) : allBookings
   const groups = groupByCategory(bookings)
 
   const bookingsWorkbook = XLSX.utils.book_new()
@@ -99,35 +111,35 @@ export function exportToExcel(directoryPath: string): ExcelExportResult {
 
   for (const [category, groupBookings] of groups) {
     const bookingRows = groupBookings.map((b) => ({
-      BOOKING: b.bookingNo,
-      'VESSEL DEPARTURE': b.vesselDeparture ?? '',
-      'DECLARATION CUT OFF': b.declarationCutOff ?? '',
-      'SI CUT OFF': b.siCutOff ?? '',
-      'CONTAINER SIZE': b.containerSizes,
-      UNIT: b.containerCount,
-      DESTINATION: b.destination ?? '',
-      LINE: b.line ?? '',
-      POL: b.pol ?? '',
-      STATUS: BOOKING_STATUS_LABELS[b.status] ?? b.status,
-      DURUM: b.notes ?? ''
+      [mt('excel.booking')]: b.bookingNo,
+      [mt('excel.vesselDeparture')]: b.vesselDeparture ?? '',
+      [mt('excel.declarationCutOff')]: b.declarationCutOff ?? '',
+      [mt('excel.siCutOff')]: b.siCutOff ?? '',
+      [mt('excel.containerSize')]: b.containerSizes,
+      [mt('excel.unit')]: b.containerCount,
+      [mt('excel.destination')]: b.destination ?? '',
+      [mt('excel.line')]: b.line ?? '',
+      [mt('excel.pol')]: b.pol ?? '',
+      [mt('excel.status')]: mt(`enums.bookingStatus.${b.status}`) ?? b.status,
+      [mt('excel.notes')]: b.notes ?? ''
     }))
 
     const containerRows: Record<string, unknown>[] = []
     for (const b of groupBookings) {
-      const containers = listContainersByBooking(b.id)
+      const containers = await listContainersByBooking(b.id)
       for (const c of containers) {
         containerRows.push({
-          BOOKING: b.bookingNo,
-          ÇEKİCİ: c.truckPlate ?? '',
-          DORSE: c.trailerPlate ?? '',
-          TELEFON: c.driverPhone ?? '',
-          'KONTEYNER TYPE': c.type,
-          KONTEYNER: c.containerNo ?? '',
-          MÜHÜR: c.sealNo ?? '',
-          'GEMİ ADI': c.vesselName ?? '',
-          IMO: c.imoNumber ?? '',
-          MMSI: c.mmsiNumber ?? '',
-          DURUM: c.notes ?? ''
+          [mt('excel.booking')]: b.bookingNo,
+          [mt('excel.truckPlate')]: c.truckPlate ?? '',
+          [mt('excel.trailerPlate')]: c.trailerPlate ?? '',
+          [mt('excel.driverPhone')]: c.driverPhone ?? '',
+          [mt('excel.containerType')]: c.type,
+          [mt('excel.containerNo')]: c.containerNo ?? '',
+          [mt('excel.sealNo')]: c.sealNo ?? '',
+          [mt('excel.vesselName')]: c.vesselName ?? '',
+          [mt('excel.imo')]: c.imoNumber ?? '',
+          [mt('excel.mmsi')]: c.mmsiNumber ?? '',
+          [mt('excel.notes')]: c.notes ?? ''
         })
       }
     }
@@ -247,10 +259,10 @@ export function resolveImportDirectory(inputPaths: string[]): string {
  * false ise veritabanına HİÇBİR YAZMA yapılmaz, sadece önizleme/doğrulama için
  * satırlar ve hatalar toplanır. Her sekme (sheet) bir kategoriyi temsil eder.
  */
-function runExcelImport(
+async function runExcelImport(
   directoryPath: string,
   commit: boolean
-): { result: ExcelImportResult; preview: ExcelPreviewResult } {
+): Promise<{ result: ExcelImportResult; preview: ExcelPreviewResult }> {
   const result: ExcelImportResult = {
     bookingsCreated: 0,
     bookingsUpdated: 0,
@@ -296,15 +308,15 @@ function runExcelImport(
     const sheet = bookingsWorkbook.Sheets[sheetName]
     const bookingRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet)
 
-    bookingRows.forEach((row, index) => {
+    for (const [index, row] of bookingRows.entries()) {
       const rowNumber = index + 2
       const bookingNo = toStringOrNull(getField(row, 'BOOKING') ?? firstColumnValue(row))
       if (!bookingNo) {
         addError(`[${sheetName}] satır ${rowNumber}: BOOKING numarası boş, atlandı.`)
-        return
+        continue
       }
 
-      const existing = getBookingByNo(bookingNo)
+      const existing = await getBookingByNo(bookingNo)
       const status = statusLabelToCode(getField(row, 'STATUS'))
       const input = {
         bookingNo,
@@ -318,12 +330,14 @@ function runExcelImport(
         status,
         archived: existing ? existing.archived : false,
         notes: toStringOrNull(getField(row, 'DURUM')),
+        unit: existing?.unit ?? null,
         blNumber: existing?.blNumber ?? null,
         eta: existing?.eta ?? null,
         etd: existing?.etd ?? null,
         blStatus: existing?.blStatus ?? null,
         freeTimeEnd: existing?.freeTimeEnd ?? null,
-        lastCarrierSyncAt: existing?.lastCarrierSyncAt ?? null
+        lastCarrierSyncAt: existing?.lastCarrierSyncAt ?? null,
+        customerId: existing?.customerId ?? null
       }
 
       const location = `${sheetName} satır ${rowNumber}`
@@ -359,18 +373,18 @@ function runExcelImport(
 
       if (commit) {
         if (existing) {
-          updateBooking(existing.id, input)
+          await updateBooking(existing.id, input)
           bookingIdByNo.set(bookingNo, existing.id)
           result.bookingsUpdated++
         } else {
-          const created = createBooking(input)
+          const created = await createBooking(input)
           bookingIdByNo.set(bookingNo, created.id)
           result.bookingsCreated++
         }
       } else if (existing) {
         bookingIdByNo.set(bookingNo, existing.id)
       }
-    })
+    }
   }
 
   for (const [bookingNo, locations] of bookingNoLocations) {
@@ -406,17 +420,17 @@ function runExcelImport(
     // Sadece "BOOKING" sütunu olan sekmeler (uygulamanın kendi dışa aktardığı
     // Containers.xlsx formatı) doğrudan konteyner olarak içe aktarılır.
     if (hasBookingColumn && !isAfganSheet) {
-      containerRows.forEach((row, index) => {
+      for (const [index, row] of containerRows.entries()) {
         const rowNumber = index + 2
         const bookingNo = toStringOrNull(getField(row, 'BOOKING') ?? firstColumnValue(row))
         if (!bookingNo) {
           addError(`[${sheetName}] satır ${rowNumber}: BOOKING numarası boş, atlandı.`)
-          return
+          continue
         }
 
         let bookingId = bookingIdByNo.get(bookingNo)
         if (bookingId === undefined) {
-          const existing = getBookingByNo(bookingNo)
+          const existing = await getBookingByNo(bookingNo)
           if (existing) {
             bookingId = existing.id
             bookingIdByNo.set(bookingNo, bookingId)
@@ -429,7 +443,7 @@ function runExcelImport(
           addError(
             `[${sheetName}] satır ${rowNumber}: "${bookingNo}" booking numarası bulunamadı, atlandı.`
           )
-          return
+          continue
         }
 
         const type = normalizeContainerType(getField(row, 'KONTEYNER TYPE'))
@@ -438,7 +452,7 @@ function runExcelImport(
           addError(
             `[${sheetName}] satır ${rowNumber}: geçersiz KONTEYNER TYPE ("${getField(row, 'KONTEYNER TYPE')}"), atlandı.`
           )
-          return
+          continue
         }
 
         if (containerNo) {
@@ -447,7 +461,7 @@ function runExcelImport(
           containerNoLocations.set(containerNo, bookingSet)
 
           if (bookingId !== undefined) {
-            const dbConflicts = findActiveContainerConflicts(containerNo).filter(
+            const dbConflicts = (await findActiveContainerConflicts(containerNo)).filter(
               (c) => c.bookingId !== bookingId
             )
             if (dbConflicts.length > 0) {
@@ -463,7 +477,7 @@ function runExcelImport(
         preview.containersToCreate++
 
         if (commit && bookingId !== undefined) {
-          createContainer({
+          await createContainer({
             bookingId,
             containerNo,
             type,
@@ -478,7 +492,7 @@ function runExcelImport(
           })
           result.containersCreated++
         }
-      })
+      }
       continue
     }
 
@@ -486,7 +500,7 @@ function runExcelImport(
     // eşleştireceği araç kayıtları. Doğrudan konteyner oluşturmak yerine
     // "Atanmayan Araçlar" bekleme listesine (unassigned_vehicles) eklenir.
     if (isAfganSheet) {
-      containerRows.forEach((row, index) => {
+      for (const [index, row] of containerRows.entries()) {
         const rowNumber = index + 2
         const truckPlate = toStringOrNull(getField(row, 'ÇEKİCİ'))
         const driverPhone = toStringOrNull(getField(row, 'TELEFON'))
@@ -503,7 +517,7 @@ function runExcelImport(
 
         if (!truckPlate && !containerNo && !sourceBookingRef) {
           // Tamamen boş/anlamsız satır, sessizce atla.
-          return
+          continue
         }
 
         preview.unassignedVehicleRows.push({
@@ -516,7 +530,7 @@ function runExcelImport(
         preview.unassignedVehiclesToCreate++
 
         if (commit) {
-          createUnassignedVehicle({
+          await createUnassignedVehicle({
             truckPlate,
             driverPhone,
             location,
@@ -531,7 +545,7 @@ function runExcelImport(
           })
           result.unassignedVehiclesCreated++
         }
-      })
+      }
       continue
     }
 
@@ -556,8 +570,8 @@ function runExcelImport(
  * YAPMADAN önizleme/doğrulama sonucu döner. Kullanıcı onaylarsa `importFromExcel`
  * çağrılarak gerçek içe aktarma yapılır.
  */
-export function previewExcelImport(directoryPath: string): ExcelPreviewResult {
-  return runExcelImport(directoryPath, false).preview
+export async function previewExcelImport(directoryPath: string): Promise<ExcelPreviewResult> {
+  return (await runExcelImport(directoryPath, false)).preview
 }
 
 /**
@@ -566,6 +580,6 @@ export function previewExcelImport(directoryPath: string): ExcelPreviewResult {
  * Her dosyadaki her sekme (sheet) bir kategoriyi (ör. Mundra, Bandar Abbas)
  * temsil eder - kategori bir sütun değil, sekmenin kendisidir.
  */
-export function importFromExcel(directoryPath: string): ExcelImportResult {
-  return runExcelImport(directoryPath, true).result
+export async function importFromExcel(directoryPath: string): Promise<ExcelImportResult> {
+  return (await runExcelImport(directoryPath, true)).result
 }

@@ -1,4 +1,8 @@
-import { getDb } from './schema'
+import { getSupabase } from './schema'
+import { getCurrentUser } from '../user/currentUser'
+import { getSession } from '../auth/session'
+import { requireActingUserId } from '../auth/authRepo'
+import { mt } from '../i18n/language'
 import type {
   Booking,
   BookingInput,
@@ -19,26 +23,28 @@ import type {
   CarrierApplyResult,
   UnassignedVehicle,
   UnassignedVehicleInput,
-  UnassignedVehicleAssignInput
+  UnassignedVehicleAssignInput,
+  UnassignedVehicleSelection,
+  PendingBookingDeletion,
+  Customer,
+  CustomerInput,
+  CustomerCreateResult,
+  CustomerDirectoryEntry
 } from '../../shared/types'
 import {
   BOOKING_STATUSES,
-  BOOKING_STATUS_LABELS,
   ARCHIVABLE_BOOKING_STATUSES,
   CONTAINER_TYPES,
   REQUIRED_DOCUMENT_TYPES,
   LOOKUP_FIELD_TYPES
 } from '../../shared/types'
 
-// ---------- Bookings ----------
-
-function mapBookingRow<T extends { archived: number | boolean }>(
-  row: T
-): T & { archived: boolean } {
-  return { ...row, archived: Boolean(row.archived) }
+function throwIfError(error: { message: string } | null): void {
+  if (error) throw new Error(error.message)
 }
 
-/** Virgülle ayrılmış yüklenmiş döküman tipi listesinden, henüz yüklenmemiş ZORUNLU tipleri hesaplar. */
+// ---------- Bookings ----------
+
 function computeMissingDocumentTypes(uploadedDocTypes: string): DocumentType[] {
   const uploaded = new Set(
     uploadedDocTypes
@@ -49,160 +55,368 @@ function computeMissingDocumentTypes(uploadedDocTypes: string): DocumentType[] {
   return REQUIRED_DOCUMENT_TYPES.filter((t) => !uploaded.has(t))
 }
 
-export function listBookings(includeArchived = false): BookingWithStats[] {
-  const db = getDb()
-  const rows = db
-    .prepare(
-      `SELECT b.*,
-              COUNT(DISTINCT c.id) AS containerCount,
-              COALESCE(GROUP_CONCAT(DISTINCT c.type), '') AS containerSizes,
-              COALESCE(GROUP_CONCAT(DISTINCT d.type), '') AS uploadedDocTypes
-       FROM bookings b
-       LEFT JOIN containers c ON c.bookingId = b.id
-       LEFT JOIN documents d ON d.bookingId = b.id
-       ${includeArchived ? '' : 'WHERE b.archived = 0'}
-       GROUP BY b.id
-       ORDER BY b.vesselDeparture IS NULL, b.vesselDeparture ASC, b.id DESC`
-    )
-    .all() as (BookingWithStats & { uploadedDocTypes: string })[]
+function mapBookingWithStatsRows(
+  rows: (BookingWithStats & { uploadedDocTypes: string })[]
+): BookingWithStats[] {
   return rows.map((row) => {
     const { uploadedDocTypes, ...rest } = row
-    return {
-      ...mapBookingRow(rest as BookingWithStats),
-      missingDocumentTypes: computeMissingDocumentTypes(uploadedDocTypes)
-    }
+    return { ...rest, missingDocumentTypes: computeMissingDocumentTypes(uploadedDocTypes) }
   })
 }
 
-export function listArchivedBookings(): BookingWithStats[] {
-  const db = getDb()
-  const rows = db
-    .prepare(
-      `SELECT b.*,
-              COUNT(DISTINCT c.id) AS containerCount,
-              COALESCE(GROUP_CONCAT(DISTINCT c.type), '') AS containerSizes,
-              COALESCE(GROUP_CONCAT(DISTINCT d.type), '') AS uploadedDocTypes
-       FROM bookings b
-       LEFT JOIN containers c ON c.bookingId = b.id
-       LEFT JOIN documents d ON d.bookingId = b.id
-       WHERE b.archived = 1
-       GROUP BY b.id
-       ORDER BY b.vesselDeparture IS NULL, b.vesselDeparture DESC, b.id DESC`
-    )
-    .all() as (BookingWithStats & { uploadedDocTypes: string })[]
-  return rows.map((row) => {
-    const { uploadedDocTypes, ...rest } = row
-    return {
-      ...mapBookingRow(rest as BookingWithStats),
-      missingDocumentTypes: computeMissingDocumentTypes(uploadedDocTypes)
+export async function listBookings(includeArchived = false): Promise<BookingWithStats[]> {
+  const supabase = getSupabase()
+  let query = supabase.from('booking_with_stats').select('*')
+  if (!includeArchived) query = query.eq('archived', false)
+  const session = getSession()
+  if (session?.role === 'CUSTOMER') {
+    if (!session.customerId) return []
+    query = query.eq('customerId', session.customerId)
+  }
+  const { data, error } = await query
+  throwIfError(error)
+  const rows = mapBookingWithStatsRows(data ?? [])
+  rows.sort((a, b) => {
+    if (!a.vesselDeparture && b.vesselDeparture) return 1
+    if (a.vesselDeparture && !b.vesselDeparture) return -1
+    if (a.vesselDeparture && b.vesselDeparture && a.vesselDeparture !== b.vesselDeparture) {
+      return a.vesselDeparture < b.vesselDeparture ? -1 : 1
     }
+    return b.id - a.id
   })
+  return rows
 }
 
-export function getBooking(id: number): Booking | undefined {
-  const db = getDb()
-  const row = db.prepare('SELECT * FROM bookings WHERE id = ?').get(id) as Booking | undefined
-  return row ? mapBookingRow(row) : undefined
+export async function listArchivedBookings(): Promise<BookingWithStats[]> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase.from('booking_with_stats').select('*').eq('archived', true)
+  throwIfError(error)
+  const rows = mapBookingWithStatsRows(data ?? [])
+  rows.sort((a, b) => {
+    if (!a.vesselDeparture && b.vesselDeparture) return 1
+    if (a.vesselDeparture && !b.vesselDeparture) return -1
+    if (a.vesselDeparture && b.vesselDeparture && a.vesselDeparture !== b.vesselDeparture) {
+      return a.vesselDeparture > b.vesselDeparture ? -1 : 1
+    }
+    return b.id - a.id
+  })
+  return rows
 }
 
-export function getBookingByNo(bookingNo: string): Booking | undefined {
-  const db = getDb()
-  const row = db.prepare('SELECT * FROM bookings WHERE bookingNo = ?').get(bookingNo) as
-    Booking | undefined
-  return row ? mapBookingRow(row) : undefined
+export async function getBooking(id: number): Promise<Booking | undefined> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase.from('bookings').select('*').eq('id', id).maybeSingle()
+  throwIfError(error)
+  const session = getSession()
+  if (session?.role === 'CUSTOMER' && data && data.customerId !== session.customerId) {
+    return undefined
+  }
+  return data ?? undefined
 }
 
-export function createBooking(input: BookingInput): Booking {
-  const db = getDb()
-  const result = db
-    .prepare(
-      `INSERT INTO bookings (bookingNo, vesselDeparture, declarationCutOff, siCutOff, category, destination, line, pol, status, archived, notes, blNumber, eta, etd, blStatus, freeTimeEnd, lastCarrierSyncAt)
-       VALUES (@bookingNo, @vesselDeparture, @declarationCutOff, @siCutOff, @category, @destination, @line, @pol, @status, @archived, @notes, @blNumber, @eta, @etd, @blStatus, @freeTimeEnd, @lastCarrierSyncAt)`
-    )
-    .run({ ...input, archived: input.archived ? 1 : 0 })
-  ensureLookupValuesFromBooking(input)
-  return getBooking(Number(result.lastInsertRowid)) as Booking
+export async function getBookingByNo(bookingNo: string): Promise<Booking | undefined> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('*')
+    .eq('bookingNo', bookingNo)
+    .maybeSingle()
+  throwIfError(error)
+  const session = getSession()
+  if (session?.role === 'CUSTOMER' && data && data.customerId !== session.customerId) {
+    return undefined
+  }
+  return data ?? undefined
 }
 
-export function updateBooking(id: number, input: BookingInput): Booking {
-  const db = getDb()
-  db.prepare(
-    `UPDATE bookings SET
-       bookingNo = @bookingNo,
-       vesselDeparture = @vesselDeparture,
-       declarationCutOff = @declarationCutOff,
-       siCutOff = @siCutOff,
-       category = @category,
-       destination = @destination,
-       line = @line,
-       pol = @pol,
-       status = @status,
-       archived = @archived,
-       notes = @notes,
-       blNumber = @blNumber,
-       eta = @eta,
-       etd = @etd,
-       blStatus = @blStatus,
-       freeTimeEnd = @freeTimeEnd,
-       lastCarrierSyncAt = @lastCarrierSyncAt,
-       updatedAt = datetime('now')
-     WHERE id = @id`
-  ).run({ ...input, archived: input.archived ? 1 : 0, id })
-  ensureLookupValuesFromBooking(input)
-  return getBooking(id) as Booking
+export async function createBooking(input: BookingInput): Promise<Booking> {
+  const supabase = getSupabase()
+  const actingUser = getCurrentUser()
+  await ensureLookupValuesFromBooking(input)
+  const { data, error } = await supabase
+    .from('bookings')
+    .insert({ ...input, createdBy: actingUser, updatedBy: actingUser })
+    .select('*')
+    .single()
+  throwIfError(error)
+  return data as Booking
 }
 
-export function setBookingArchived(id: number, archived: boolean): Booking {
-  const db = getDb()
+export async function createBookingWithVehicles(
+  input: BookingInput,
+  vehicles: UnassignedVehicleSelection[]
+): Promise<Booking> {
+  if (
+    !Array.isArray(vehicles) ||
+    vehicles.length === 0 ||
+    vehicles.some(
+      (vehicle) =>
+        !vehicle ||
+        !Number.isSafeInteger(vehicle.id) ||
+        vehicle.id <= 0 ||
+        !CONTAINER_TYPES.includes(vehicle.type) ||
+        (vehicle.containerNo !== null && typeof vehicle.containerNo !== 'string')
+    ) ||
+    new Set(vehicles.map((vehicle) => vehicle.id)).size !== vehicles.length
+  ) {
+    throw new Error(mt('unassignedVehicles.invalidSelection'))
+  }
+  if (!Number.isSafeInteger(input.unit) || (input.unit ?? 0) < vehicles.length) {
+    throw new Error(mt('unassignedVehicles.unitTooSmall', { count: vehicles.length }))
+  }
+  const supabase = getSupabase()
+  await ensureLookupValuesFromBooking(input)
+  const { data, error } = await supabase.rpc('create_booking_with_vehicles', {
+    p_booking: input,
+    p_vehicles: vehicles,
+    p_acting_user: getCurrentUser()
+  })
+  if (error?.code === 'UV001') {
+    throw new Error(mt('unassignedVehicles.invalidSelection'))
+  }
+  if (error?.code === 'UV002') {
+    throw new Error(mt('unassignedVehicles.selectionUnavailable'))
+  }
+  if (error?.code === 'UV003') {
+    throw new Error(mt('unassignedVehicles.unitTooSmall', { count: vehicles.length }))
+  }
+  if (error?.code === '23505') {
+    throw new Error(mt('bookingForm.duplicateBookingNo'))
+  }
+  if (error?.code === 'PGRST202') {
+    throw new Error(mt('unassignedVehicles.databaseUpdateRequired'))
+  }
+  throwIfError(error)
+  return data as Booking
+}
+
+export async function updateBooking(id: number, input: BookingInput): Promise<Booking> {
+  const supabase = getSupabase()
+  const actingUser = getCurrentUser()
+  await ensureLookupValuesFromBooking(input)
+  const { data, error } = await supabase
+    .from('bookings')
+    .update({ ...input, updatedAt: new Date().toISOString(), updatedBy: actingUser })
+    .eq('id', id)
+    .select('*')
+    .single()
+  throwIfError(error)
+  return data as Booking
+}
+
+export async function setBookingArchived(id: number, archived: boolean): Promise<Booking> {
+  const supabase = getSupabase()
+  const actingUser = getCurrentUser()
   if (archived) {
-    const booking = getBooking(id)
+    const booking = await getBooking(id)
     if (booking && !ARCHIVABLE_BOOKING_STATUSES.includes(booking.status)) {
       throw new Error(
-        `Sadece "${ARCHIVABLE_BOOKING_STATUSES.map((s) => BOOKING_STATUS_LABELS[s]).join(' veya ')}" statüsündeki bookingler arşivlenebilir.`
+        mt('errors.archiveStatusNotAllowed', {
+          statuses: ARCHIVABLE_BOOKING_STATUSES.map((s) => mt(`enums.bookingStatus.${s}`)).join(
+            ` ${mt('common.or')} `
+          )
+        })
       )
     }
   }
-  db.prepare(`UPDATE bookings SET archived = ?, updatedAt = datetime('now') WHERE id = ?`).run(
-    archived ? 1 : 0,
-    id
-  )
-  return getBooking(id) as Booking
+  const { data, error } = await supabase
+    .from('bookings')
+    .update({ archived, updatedAt: new Date().toISOString(), updatedBy: actingUser })
+    .eq('id', id)
+    .select('*')
+    .single()
+  throwIfError(error)
+  return data as Booking
 }
 
-export function deleteBooking(id: number): void {
-  const db = getDb()
-  db.prepare('DELETE FROM bookings WHERE id = ?').run(id)
+export async function deleteBooking(id: number): Promise<void> {
+  const supabase = getSupabase()
+  const { error } = await supabase.from('bookings').delete().eq('id', id)
+  throwIfError(error)
+}
+
+// ---------- Booking silme onay akışı (Operation Manager/Admin onayı gerektiren roller için) ----------
+
+const PENDING_DELETION_UNIQUE_VIOLATION = '23505'
+
+export async function createPendingDeletion(bookingId: number): Promise<PendingBookingDeletion> {
+  const supabase = getSupabase()
+  const booking = await getBooking(bookingId)
+  if (!booking) throw new Error(mt('errors.bookingNotFound'))
+  const { data, error } = await supabase
+    .from('pending_booking_deletions')
+    .insert({
+      bookingId,
+      bookingNo: booking.bookingNo,
+      blNumber: booking.blNumber,
+      destination: booking.destination,
+      line: booking.line,
+      requestedBy: getCurrentUser()
+    })
+    .select('*')
+    .single()
+  if (error) {
+    if (error.code === PENDING_DELETION_UNIQUE_VIOLATION) {
+      throw new Error(mt('errors.pendingDeletionAlreadyExists'))
+    }
+    throw new Error(error.message)
+  }
+  return data as PendingBookingDeletion
+}
+
+export async function listPendingDeletions(
+  filterRequestedBy?: string
+): Promise<PendingBookingDeletion[]> {
+  const supabase = getSupabase()
+  let query = supabase
+    .from('pending_booking_deletions')
+    .select('*')
+    .order('requestedAt', { ascending: false })
+  if (filterRequestedBy) query = query.eq('requestedBy', filterRequestedBy)
+  const { data, error } = await query
+  throwIfError(error)
+  return (data ?? []) as PendingBookingDeletion[]
+}
+
+export async function listActivePendingDeletionBookingIds(): Promise<number[]> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('pending_booking_deletions')
+    .select('bookingId')
+    .eq('status', 'PENDING')
+  throwIfError(error)
+  return (data ?? []).map((row) => row.bookingId as number)
+}
+
+export async function approvePendingDeletion(requestId: number): Promise<void> {
+  const supabase = getSupabase()
+  const { error } = await supabase.rpc('rpc_approve_booking_deletion', {
+    p_request_id: requestId,
+    p_decided_by: getCurrentUser()
+  })
+  throwIfError(error)
+}
+
+export async function rejectPendingDeletion(requestId: number, note?: string): Promise<void> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('pending_booking_deletions')
+    .update({
+      status: 'REJECTED',
+      decidedBy: getCurrentUser(),
+      decidedAt: new Date().toISOString(),
+      decisionNote: note ?? null
+    })
+    .eq('id', requestId)
+    .eq('status', 'PENDING')
+    .select('id')
+  throwIfError(error)
+  if (!data || data.length === 0) throw new Error(mt('errors.pendingDeletionAlreadyDecided'))
+}
+
+export async function withdrawPendingDeletion(requestId: number): Promise<void> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('pending_booking_deletions')
+    .delete()
+    .eq('id', requestId)
+    .eq('requestedBy', getCurrentUser())
+    .eq('status', 'PENDING')
+    .select('id')
+  throwIfError(error)
+  if (!data || data.length === 0) throw new Error(mt('errors.pendingDeletionWithdrawNotAllowed'))
+}
+
+// ---------- Müşteri Yönetimi (Customer) ----------
+
+export async function listCustomers(): Promise<Customer[]> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase.from('customers').select('*').order('name')
+  throwIfError(error)
+  return (data ?? []) as Customer[]
+}
+
+export async function getCustomer(id: number): Promise<Customer | undefined> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase.from('customers').select('*').eq('id', id).maybeSingle()
+  throwIfError(error)
+  return data ?? undefined
+}
+
+export async function listCustomerDirectory(): Promise<CustomerDirectoryEntry[]> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase.from('customers').select('id, name').order('name')
+  throwIfError(error)
+  return (data ?? []) as CustomerDirectoryEntry[]
+}
+
+export async function createCustomer(
+  input: CustomerInput,
+  initialPassword: string
+): Promise<CustomerCreateResult> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase.rpc('rpc_create_customer_with_user', {
+    p_acting_user_id: requireActingUserId(),
+    p_tax_no: input.taxNo,
+    p_name: input.name,
+    p_tax_office: input.taxOffice,
+    p_address: input.address,
+    p_email: input.email,
+    p_phone: input.phone,
+    p_initial_password: initialPassword
+  })
+  if (error) throw new Error(error.message)
+  return data as CustomerCreateResult
+}
+
+export async function updateCustomer(id: number, input: CustomerInput): Promise<Customer> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('customers')
+    .update({ ...input, updatedAt: new Date().toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single()
+  throwIfError(error)
+  return data as Customer
+}
+
+export async function deleteCustomer(id: number): Promise<void> {
+  const supabase = getSupabase()
+  const { error } = await supabase.rpc('rpc_delete_customer', {
+    p_acting_user_id: requireActingUserId(),
+    p_customer_id: id
+  })
+  throwIfError(error)
 }
 
 // ---------- Lookup values (Kategori/Destination/Line/POL) ----------
 
-export function listLookupValues(fieldType: LookupFieldType): string[] {
-  const db = getDb()
-  const rows = db
-    .prepare(
-      'SELECT value FROM lookup_values WHERE fieldType = ? ORDER BY value COLLATE NOCASE ASC'
-    )
-    .all(fieldType) as Array<{ value: string }>
-  return rows.map((r) => r.value)
+export async function listLookupValues(fieldType: LookupFieldType): Promise<string[]> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('lookup_values')
+    .select('value')
+    .eq('fieldType', fieldType)
+    .order('value', { ascending: true })
+  throwIfError(error)
+  return (data ?? []).map((r) => r.value)
 }
 
-export function addLookupValue(fieldType: LookupFieldType, value: string): string[] {
+export async function addLookupValue(fieldType: LookupFieldType, value: string): Promise<string[]> {
   const trimmed = value.trim()
   if (trimmed) {
-    const db = getDb()
-    db.prepare(
-      'INSERT OR IGNORE INTO lookup_values (fieldType, value) VALUES (@fieldType, @value)'
-    ).run({ fieldType, value: trimmed })
+    const supabase = getSupabase()
+    // Unique index "lookup_values(fieldType, lower(value))" is an EXPRESSION index -
+    // supabase-js upsert()'s onConflict only supports plain column lists, so a plain
+    // insert + swallow-the-unique-violation (23505) is used instead of upsert.
+    const { error } = await supabase.from('lookup_values').insert({ fieldType, value: trimmed })
+    if (error && error.code !== '23505') throw new Error(error.message)
   }
   return listLookupValues(fieldType)
 }
 
-/**
- * Booking oluşturma/güncelleme sırasında girilen kategori/destination/line/pol
- * değerlerini, formdan geçilmeden (ör. Excel içe aktarma) girilmiş olsa dahi
- * dropdown listelerine otomatik ekler.
- */
-function ensureLookupValuesFromBooking(input: BookingInput): void {
+async function ensureLookupValuesFromBooking(input: BookingInput): Promise<void> {
   const fieldValues: Record<LookupFieldType, string | null> = {
     category: input.category,
     destination: input.destination,
@@ -212,232 +426,266 @@ function ensureLookupValuesFromBooking(input: BookingInput): void {
   for (const fieldType of LOOKUP_FIELD_TYPES) {
     const value = fieldValues[fieldType]
     if (value && value.trim()) {
-      addLookupValue(fieldType, value)
+      await addLookupValue(fieldType, value)
     }
   }
 }
 
 // ---------- Containers ----------
 
-export function listContainersByBooking(bookingId: number): Container[] {
-  const db = getDb()
-  return db
-    .prepare('SELECT * FROM containers WHERE bookingId = ? ORDER BY id ASC')
-    .all(bookingId) as Container[]
+export async function listContainersByBooking(bookingId: number): Promise<Container[]> {
+  const session = getSession()
+  if (session?.role === 'CUSTOMER' && !(await getBooking(bookingId))) {
+    throw new Error(mt('errors.notAuthorized'))
+  }
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('containers')
+    .select('*')
+    .eq('bookingId', bookingId)
+    .order('id', { ascending: true })
+  throwIfError(error)
+  return (data ?? []) as Container[]
 }
 
-export function getContainer(id: number): Container | undefined {
-  const db = getDb()
-  return db.prepare('SELECT * FROM containers WHERE id = ?').get(id) as Container | undefined
-}
-
-export function createContainer(input: ContainerInput): Container {
-  const db = getDb()
-  const result = db
-    .prepare(
-      `INSERT INTO containers (bookingId, containerNo, type, sealNo, truckPlate, trailerPlate, driverPhone, vesselName, imoNumber, mmsiNumber, notes)
-       VALUES (@bookingId, @containerNo, @type, @sealNo, @truckPlate, @trailerPlate, @driverPhone, @vesselName, @imoNumber, @mmsiNumber, @notes)`
-    )
-    .run(input)
-  return getContainer(Number(result.lastInsertRowid)) as Container
-}
-
-export function updateContainer(id: number, input: ContainerInput): Container {
-  const db = getDb()
-  db.prepare(
-    `UPDATE containers SET
-       bookingId = @bookingId,
-       containerNo = @containerNo,
-       type = @type,
-       sealNo = @sealNo,
-       truckPlate = @truckPlate,
-       trailerPlate = @trailerPlate,
-       driverPhone = @driverPhone,
-       vesselName = @vesselName,
-       imoNumber = @imoNumber,
-       mmsiNumber = @mmsiNumber,
-       notes = @notes,
-       updatedAt = datetime('now')
-     WHERE id = @id`
-  ).run({ ...input, id })
-  return getContainer(id) as Container
-}
-
-export function listAllContainers(): Container[] {
-  const db = getDb()
-  return db.prepare('SELECT * FROM containers').all() as Container[]
+export async function getContainer(id: number): Promise<Container | undefined> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase.from('containers').select('*').eq('id', id).maybeSingle()
+  throwIfError(error)
+  return data ?? undefined
 }
 
 /**
- * Armatör API'sinden çekilen bir CarrierBookingSnapshot'ı mevcut bir booking'e uygular:
- * booking alanlarını (blNumber/eta/etd/blStatus/freeTimeEnd + boşsa pol/destination) günceller,
- * snapshot'taki konteynırları containerNo'ya göre bu booking altındaki mevcut konteynırlarla
- * eşleştirip vesselName/imoNumber alanlarını günceller. Eşleşmeyen konteynır no'ları oluşturmaz
- * (tipini güvenilir şekilde bilemeyiz), sadece raporlar.
+ * Booking'de "unit" (planlanan konteyner sayısı) belirtilmemişse kapasite 0
+ * kabul edilir, yani hiç konteyner eklenemez. Belirtilmişse, mevcut konteyner
+ * sayısının bunu aşmasını engeller.
  */
-export function applyCarrierSnapshotToBooking(
+async function assertContainerCapacity(bookingId: number): Promise<void> {
+  const supabase = getSupabase()
+  const { data: booking, error: bookingError } = await supabase
+    .from('bookings')
+    .select('unit')
+    .eq('id', bookingId)
+    .maybeSingle()
+  throwIfError(bookingError)
+  const unit = (booking as { unit: number | null } | null)?.unit ?? 0
+
+  const { count, error: countError } = await supabase
+    .from('containers')
+    .select('id', { count: 'exact', head: true })
+    .eq('bookingId', bookingId)
+  throwIfError(countError)
+  if ((count ?? 0) >= unit) {
+    throw new Error(
+      unit === 0
+        ? 'Bu booking için Unit sayısı girilmemiş. Konteyner eklemeden önce Unit alanını doldurun.'
+        : `Bu booking için Unit sayısı (${unit}) kadar konteyner zaten eklendi. Daha fazla konteyner eklenemez.`
+    )
+  }
+}
+
+export async function createContainer(input: ContainerInput): Promise<Container> {
+  const supabase = getSupabase()
+  const actingUser = getCurrentUser()
+  await assertContainerCapacity(input.bookingId)
+  const { data, error } = await supabase
+    .from('containers')
+    .insert({ ...input, createdBy: actingUser, updatedBy: actingUser })
+    .select('*')
+    .single()
+  throwIfError(error)
+  return data as Container
+}
+
+export async function updateContainer(id: number, input: ContainerInput): Promise<Container> {
+  const supabase = getSupabase()
+  const actingUser = getCurrentUser()
+  const { data, error } = await supabase
+    .from('containers')
+    .update({ ...input, updatedAt: new Date().toISOString(), updatedBy: actingUser })
+    .eq('id', id)
+    .select('*')
+    .single()
+  throwIfError(error)
+  return data as Container
+}
+
+export async function listAllContainers(): Promise<Container[]> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase.from('containers').select('*')
+  throwIfError(error)
+  return (data ?? []) as Container[]
+}
+
+/** Armatör API'sinden çekilen snapshot'ı bookinge uygular - tek atomik RPC çağrısı (bkz. worker/sql/002_rls_and_functions.sql). */
+export async function applyCarrierSnapshotToBooking(
   bookingId: number,
   snapshot: CarrierBookingSnapshot
-): CarrierApplyResult {
-  const existing = getBooking(bookingId)
-  if (!existing) {
-    throw new Error('Booking bulunamadı.')
-  }
+): Promise<CarrierApplyResult> {
+  const supabase = getSupabase()
+  const actingUser = getCurrentUser()
+  const { data, error } = await supabase.rpc('apply_carrier_snapshot', {
+    p_booking_id: bookingId,
+    p_snapshot: snapshot,
+    p_acting_user: actingUser
+  })
+  throwIfError(error)
+  return data as CarrierApplyResult
+}
 
-  const updatedBookingInput: BookingInput = {
-    ...existing,
-    blNumber: snapshot.blNumber ?? existing.blNumber,
-    eta: snapshot.eta ?? existing.eta,
-    etd: snapshot.etd ?? existing.etd,
-    blStatus: snapshot.blStatus ?? existing.blStatus,
-    freeTimeEnd: snapshot.freeTimeEnd ?? existing.freeTimeEnd,
-    pol: existing.pol ?? snapshot.pol,
-    destination: existing.destination ?? snapshot.destination,
-    lastCarrierSyncAt: new Date().toISOString()
-  }
-  const booking = updateBooking(bookingId, updatedBookingInput)
-
-  const containers = listContainersByBooking(bookingId)
-  const updatedContainerNos: string[] = []
-  const unmatchedContainerNos: string[] = []
-
-  for (const snapshotContainer of snapshot.containers) {
-    const match = containers.find(
-      (c) =>
-        c.containerNo?.trim().toUpperCase() === snapshotContainer.containerNo.trim().toUpperCase()
+export async function listContainersForTracking(): Promise<ContainerWithBooking[]> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('containers')
+    .select(
+      '*, bookings!inner(bookingNo, status, pol, destination, line, vesselDeparture, archived)'
     )
-    if (!match) {
-      unmatchedContainerNos.push(snapshotContainer.containerNo)
-      continue
-    }
-    updateContainer(match.id, {
-      ...match,
-      vesselName: snapshot.vesselName ?? match.vesselName,
-      imoNumber: snapshot.imoNumber ?? match.imoNumber
+    .eq('bookings.archived', false)
+  throwIfError(error)
+  type BookingJoin = {
+    bookingNo: string
+    status: BookingStatus
+    pol: string | null
+    destination: string | null
+    line: string | null
+    vesselDeparture: string | null
+  }
+  type Row = Container & {
+    bookings: BookingJoin | BookingJoin[] | null
+  }
+  const rows = ((data ?? []) as unknown as Row[])
+    .map(({ bookings, ...container }) => {
+      const b = Array.isArray(bookings) ? bookings[0] : bookings
+      if (!b) return null
+      return {
+        ...container,
+        bookingNo: b.bookingNo,
+        bookingStatus: b.status,
+        bookingPol: b.pol,
+        bookingDestination: b.destination,
+        bookingLine: b.line,
+        bookingVesselDeparture: b.vesselDeparture
+      }
     })
-    updatedContainerNos.push(snapshotContainer.containerNo)
-  }
-
-  return { booking, updatedContainerNos, unmatchedContainerNos }
-}
-
-/**
- * Gemi takip ekranı için: arşivlenmemiş bookinglere ait tüm konteynerları,
- * booking numarası/statüsüyle birlikte döner (tree/harita filtrelemede kullanılır).
- */
-export function listContainersForTracking(): ContainerWithBooking[] {
-  const db = getDb()
-  return db
-    .prepare(
-      `SELECT c.*, b.bookingNo AS bookingNo, b.status AS bookingStatus,
-              b.pol AS bookingPol, b.destination AS bookingDestination, b.line AS bookingLine,
-              b.vesselDeparture AS bookingVesselDeparture
-       FROM containers c
-       JOIN bookings b ON b.id = c.bookingId
-       WHERE b.archived = 0
-       ORDER BY b.bookingNo ASC, c.id ASC`
-    )
-    .all() as ContainerWithBooking[]
-}
-
-/**
- * Aynı konteyner numarasının, arşivlenmemiş (aktif) farklı bir booking'de
- * zaten kayıtlı olup olmadığını kontrol eder. Mükerrer veri girişi/insan
- * hatası uyarısı için kullanılır.
- */
-export function findActiveContainerConflicts(
-  containerNo: string,
-  excludeContainerId?: number
-): ContainerConflict[] {
-  const trimmed = containerNo.trim()
-  if (!trimmed) return []
-  const db = getDb()
-  const rows = db
-    .prepare(
-      `SELECT c.id AS containerId, c.bookingId, b.bookingNo, b.status AS bookingStatus
-       FROM containers c
-       JOIN bookings b ON b.id = c.bookingId
-       WHERE b.archived = 0
-         AND UPPER(TRIM(c.containerNo)) = UPPER(?)
-         AND (? IS NULL OR c.id != ?)`
-    )
-    .all(trimmed, excludeContainerId ?? null, excludeContainerId ?? null) as ContainerConflict[]
+    .filter((r): r is NonNullable<typeof r> => r !== null)
+  rows.sort((a, b) => a.bookingNo.localeCompare(b.bookingNo) || a.id - b.id)
   return rows
 }
 
-export function deleteContainer(id: number): void {
-  const db = getDb()
-  db.prepare('DELETE FROM containers WHERE id = ?').run(id)
+export async function findActiveContainerConflicts(
+  containerNo: string,
+  excludeContainerId?: number
+): Promise<ContainerConflict[]> {
+  const trimmed = containerNo.trim()
+  if (!trimmed) return []
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('containers')
+    .select('id, bookingId, bookings!inner(bookingNo, status, archived)')
+    .eq('bookings.archived', false)
+    .ilike('containerNo', trimmed)
+  throwIfError(error)
+  type BookingJoin = { bookingNo: string; status: BookingStatus }
+  type Row = {
+    id: number
+    bookingId: number
+    bookings: BookingJoin | BookingJoin[] | null
+  }
+  return ((data ?? []) as unknown as Row[])
+    .filter((r) => !excludeContainerId || r.id !== excludeContainerId)
+    .map((r) => {
+      const b = Array.isArray(r.bookings) ? r.bookings[0] : r.bookings
+      return b
+        ? {
+            containerId: r.id,
+            bookingId: r.bookingId,
+            bookingNo: b.bookingNo,
+            bookingStatus: b.status
+          }
+        : null
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null)
+}
+
+export async function deleteContainer(id: number): Promise<void> {
+  const supabase = getSupabase()
+  const { error } = await supabase.from('containers').delete().eq('id', id)
+  throwIfError(error)
 }
 
 // ---------- Unassigned Vehicles (Atanmayan Araçlar) ----------
 
-export function listUnassignedVehicles(): UnassignedVehicle[] {
-  const db = getDb()
-  return db
-    .prepare('SELECT * FROM unassigned_vehicles ORDER BY id DESC')
-    .all() as UnassignedVehicle[]
+export async function listUnassignedVehicles(): Promise<UnassignedVehicle[]> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('unassigned_vehicles')
+    .select('*')
+    .order('id', { ascending: false })
+  throwIfError(error)
+  return (data ?? []) as UnassignedVehicle[]
 }
 
-export function getUnassignedVehicle(id: number): UnassignedVehicle | undefined {
-  const db = getDb()
-  return db.prepare('SELECT * FROM unassigned_vehicles WHERE id = ?').get(id) as
-    UnassignedVehicle | undefined
+export async function getUnassignedVehicle(id: number): Promise<UnassignedVehicle | undefined> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('unassigned_vehicles')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle()
+  throwIfError(error)
+  return data ?? undefined
 }
 
-export function createUnassignedVehicle(input: UnassignedVehicleInput): UnassignedVehicle {
-  const db = getDb()
-  const result = db
-    .prepare(
-      `INSERT INTO unassigned_vehicles (truckPlate, driverPhone, location, type, containerNo, agent, sealNo, notes, sourceBookingRef, sourceSheet, sourceRow)
-       VALUES (@truckPlate, @driverPhone, @location, @type, @containerNo, @agent, @sealNo, @notes, @sourceBookingRef, @sourceSheet, @sourceRow)`
-    )
-    .run(input)
-  return getUnassignedVehicle(Number(result.lastInsertRowid)) as UnassignedVehicle
+export async function createUnassignedVehicle(
+  input: UnassignedVehicleInput
+): Promise<UnassignedVehicle> {
+  const supabase = getSupabase()
+  const actingUser = getCurrentUser()
+  const { data, error } = await supabase
+    .from('unassigned_vehicles')
+    .insert({ ...input, createdBy: actingUser })
+    .select('*')
+    .single()
+  throwIfError(error)
+  return data as UnassignedVehicle
 }
 
-export function deleteUnassignedVehicle(id: number): void {
-  const db = getDb()
-  db.prepare('DELETE FROM unassigned_vehicles WHERE id = ?').run(id)
+export async function deleteUnassignedVehicle(id: number): Promise<void> {
+  const supabase = getSupabase()
+  const { error } = await supabase.from('unassigned_vehicles').delete().eq('id', id)
+  throwIfError(error)
 }
 
-/**
- * Bir "Atanmayan Araç" kaydını gerçek bir booking'e konteyner olarak atar: kullanıcının
- * seçtiği booking + konteyner tipi + (varsa düzenlediği) konteyner no ile yeni bir
- * `Container` oluşturur, ardından bekleme kaydını siler - böylece kayıt artık normal
- * şekilde ilgili booking'in konteyner listesinde görünür.
- */
-export function assignUnassignedVehicle(
+/** Atanmayan araç kaydını bir booking'e konteyner olarak atar - tek atomik RPC çağrısı. */
+export async function assignUnassignedVehicle(
   id: number,
   input: UnassignedVehicleAssignInput
-): Container {
-  const vehicle = getUnassignedVehicle(id)
-  if (!vehicle) {
-    throw new Error('Atanmayan araç kaydı bulunamadı.')
-  }
-  const container = createContainer({
-    bookingId: input.bookingId,
-    containerNo: input.containerNo ?? vehicle.containerNo,
-    type: input.type,
-    sealNo: vehicle.sealNo,
-    truckPlate: vehicle.truckPlate,
-    trailerPlate: null,
-    driverPhone: vehicle.driverPhone,
-    vesselName: null,
-    imoNumber: null,
-    mmsiNumber: null,
-    notes:
-      [vehicle.notes, vehicle.agent ? `Acente: ${vehicle.agent}` : null]
-        .filter((v): v is string => Boolean(v))
-        .join(' | ') || null
+): Promise<Container> {
+  const supabase = getSupabase()
+  const actingUser = getCurrentUser()
+  const { data, error } = await supabase.rpc('assign_unassigned_vehicle', {
+    p_vehicle_id: id,
+    p_booking_id: input.bookingId,
+    p_container_no: input.containerNo,
+    p_type: input.type,
+    p_acting_user: actingUser
   })
-  deleteUnassignedVehicle(id)
-  return container
+  if (error?.code === 'UV002') {
+    throw new Error(mt('unassignedVehicles.vehicleUnavailable'))
+  }
+  throwIfError(error)
+  return data as Container
 }
 
 // ---------- Dashboard ----------
 
-/** Bir tarih (YYYY-MM-DD...) verilen rapor dönemine (bugün/bu hafta/bu ay/bu sene/hepsi) düşüyor mu? */
+function isoDateOnly(d: Date): string {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 function isDateInReportRange(dateStr: string | null, range: ReportRange, today: Date): boolean {
   if (range === 'all') return true
   if (!dateStr) return false
@@ -460,11 +708,9 @@ function isDateInReportRange(dateStr: string | null, range: ReportRange, today: 
   if (range === 'month') {
     return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth()
   }
-  // 'year'
   return d.getFullYear() === today.getFullYear()
 }
 
-/** { değer: sayı } haritasını, en çoktan aza sıralı ilk N satıra çevirir (boş/null değerler hariç). */
 function topBreakdown(values: (string | null)[], limit = 6): ReportBreakdownRow[] {
   const counts = new Map<string, number>()
   for (const v of values) {
@@ -478,14 +724,13 @@ function topBreakdown(values: (string | null)[], limit = 6): ReportBreakdownRow[
     .slice(0, limit)
 }
 
-export function getDashboardStats(range: ReportRange = 'all'): DashboardStats {
-  const bookings = listBookings()
-  const containers = listAllContainers()
+export async function getDashboardStats(range: ReportRange = 'all'): Promise<DashboardStats> {
+  const bookings = await listBookings()
+  const containers = await listAllContainers()
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  // Raporlar bölümü (statü/konteyner/hat/liman dağılımları) seçili döneme göre filtrelenir.
   const reportBookings = bookings.filter((b) =>
     isDateInReportRange(b.vesselDeparture, range, today)
   )
@@ -517,8 +762,37 @@ export function getDashboardStats(range: ReportRange = 'all'): DashboardStats {
   const lineCounts = topBreakdown(reportBookings.map((b) => b.line))
   const polCounts = topBreakdown(reportBookings.map((b) => b.pol))
 
-  // İçinde bulunulan hafta (Pazartesi-Pazar) ve bir sonraki hafta sınırları.
-  const dayOfWeek = today.getDay() // 0=Pazar..6=Cumartesi
+  const customerDirectory = await listCustomerDirectory()
+  const customerNameById = new Map(customerDirectory.map((c) => [c.id, c.name]))
+  const noCustomerLabel = mt('dashboard.noCustomerLabel')
+  function customerLabel(customerId: number | null): string {
+    if (customerId == null) return noCustomerLabel
+    return customerNameById.get(customerId) ?? noCustomerLabel
+  }
+
+  const bookingCountsByCustomer = new Map<string, number>()
+  for (const b of reportBookings) {
+    const label = customerLabel(b.customerId)
+    bookingCountsByCustomer.set(label, (bookingCountsByCustomer.get(label) ?? 0) + 1)
+  }
+  const customerBookingCounts = Array.from(bookingCountsByCustomer.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6)
+
+  const customerIdByBookingId = new Map(reportBookings.map((b) => [b.id, b.customerId]))
+  const containerCountsByCustomer = new Map<string, number>()
+  for (const c of containers) {
+    if (!reportBookingIds.has(c.bookingId)) continue
+    const label = customerLabel(customerIdByBookingId.get(c.bookingId) ?? null)
+    containerCountsByCustomer.set(label, (containerCountsByCustomer.get(label) ?? 0) + 1)
+  }
+  const customerContainerCounts = Array.from(containerCountsByCustomer.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6)
+
+  const dayOfWeek = today.getDay()
   const mondayOffset = (dayOfWeek + 6) % 7
   const weekStart = new Date(today)
   weekStart.setDate(weekStart.getDate() - mondayOffset)
@@ -534,7 +808,6 @@ export function getDashboardStats(range: ReportRange = 'all'): DashboardStats {
   const nextWeekStartStr = isoDateOnly(nextWeekStart)
   const nextWeekEndStr = isoDateOnly(nextWeekEnd)
 
-  // Yaklaşan Bookingler: bir sonraki haftanın (Pazartesi-Pazar) Vessel Departure'a göre bookingleri
   const upcoming = bookings
     .filter((b) => {
       if (!b.vesselDeparture) return false
@@ -543,7 +816,6 @@ export function getDashboardStats(range: ReportRange = 'all'): DashboardStats {
     })
     .sort((a, b) => (a.vesselDeparture ?? '').localeCompare(b.vesselDeparture ?? ''))
 
-  // Haftalık operasyon planlama tablosu: içinde bulunulan haftanın (Pazartesi-Pazar) SI Cutoff'a göre bookingleri
   const weeklyPlan = bookings
     .filter((b) => {
       if (!b.siCutOff) return false
@@ -553,64 +825,78 @@ export function getDashboardStats(range: ReportRange = 'all'): DashboardStats {
     })
     .sort((a, b) => (a.siCutOff ?? '').localeCompare(b.siCutOff ?? ''))
 
-  return { statusCounts, containerTypeCounts, lineCounts, polCounts, upcoming, weeklyPlan }
+  return {
+    statusCounts,
+    containerTypeCounts,
+    lineCounts,
+    polCounts,
+    customerBookingCounts,
+    customerContainerCounts,
+    upcoming,
+    weeklyPlan
+  }
 }
 
 /** Raporlar bölümü: seçili döneme (bugün/bu hafta/bu ay/bu sene/hepsi) düşen bookingleri döner. */
-export function getBookingsInRange(range: ReportRange): BookingWithStats[] {
-  const bookings = listBookings()
+export async function getBookingsInRange(range: ReportRange): Promise<BookingWithStats[]> {
+  const bookings = await listBookings()
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   return bookings.filter((b) => isDateInReportRange(b.vesselDeparture, range, today))
 }
 
-function isoDateOnly(d: Date): string {
-  const year = d.getFullYear()
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
 // ---------- Documents ----------
 
-export function listDocumentsByBooking(bookingId: number): AppDocument[] {
-  const db = getDb()
-  return db
-    .prepare('SELECT * FROM documents WHERE bookingId = ? ORDER BY uploadedAt ASC')
-    .all(bookingId) as AppDocument[]
+export async function listDocumentsByBooking(bookingId: number): Promise<AppDocument[]> {
+  const session = getSession()
+  if (session?.role === 'CUSTOMER' && !(await getBooking(bookingId))) {
+    throw new Error(mt('errors.notAuthorized'))
+  }
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('documents')
+    .select('*')
+    .eq('bookingId', bookingId)
+    .order('uploadedAt', { ascending: true })
+  throwIfError(error)
+  return (data ?? []) as AppDocument[]
 }
 
 /** Bir booking için henüz yüklenmemiş ZORUNLU döküman tiplerini döner (raporlarda kullanılır). */
-export function getMissingDocumentTypesForBooking(bookingId: number): DocumentType[] {
-  const uploaded = listDocumentsByBooking(bookingId)
+export async function getMissingDocumentTypesForBooking(
+  bookingId: number
+): Promise<DocumentType[]> {
+  const uploaded = await listDocumentsByBooking(bookingId)
   const uploadedTypes = new Set(uploaded.map((d) => d.type))
   return REQUIRED_DOCUMENT_TYPES.filter((t) => !uploadedTypes.has(t))
 }
 
-export function addDocument(
+export async function addDocument(
   bookingId: number,
   type: DocumentType,
   filePath: string,
   originalFileName: string | null
-): AppDocument {
-  const db = getDb()
-  const result = db
-    .prepare(
-      `INSERT INTO documents (bookingId, type, filePath, originalFileName)
-       VALUES (?, ?, ?, ?)`
-    )
-    .run(bookingId, type, filePath, originalFileName)
-  return db
-    .prepare('SELECT * FROM documents WHERE id = ?')
-    .get(Number(result.lastInsertRowid)) as AppDocument
+): Promise<AppDocument> {
+  const supabase = getSupabase()
+  const actingUser = getCurrentUser()
+  const { data, error } = await supabase
+    .from('documents')
+    .insert({ bookingId, type, filePath, originalFileName, createdBy: actingUser })
+    .select('*')
+    .single()
+  throwIfError(error)
+  return data as AppDocument
 }
 
-export function getDocument(id: number): AppDocument | undefined {
-  const db = getDb()
-  return db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as AppDocument | undefined
+export async function getDocument(id: number): Promise<AppDocument | undefined> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase.from('documents').select('*').eq('id', id).maybeSingle()
+  throwIfError(error)
+  return data ?? undefined
 }
 
-export function deleteDocument(id: number): void {
-  const db = getDb()
-  db.prepare('DELETE FROM documents WHERE id = ?').run(id)
+export async function deleteDocument(id: number): Promise<void> {
+  const supabase = getSupabase()
+  const { error } = await supabase.from('documents').delete().eq('id', id)
+  throwIfError(error)
 }

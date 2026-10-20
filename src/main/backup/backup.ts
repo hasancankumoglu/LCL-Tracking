@@ -1,14 +1,38 @@
-import { app } from 'electron'
 import { join } from 'path'
-import { existsSync, mkdirSync, rmSync, copyFileSync, statSync, cpSync } from 'fs'
+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync, readFileSync } from 'fs'
 import { tmpdir } from 'os'
 import AdmZip from 'adm-zip'
-import { getDb, getDbPath, closeDb } from '../db/schema'
-import { getDocumentsRoot } from '../documents/storage'
+import { getSupabase } from '../db/schema'
 import { getBackupConfig, updateBackupConfig } from './config'
 import { describeFsError } from '../utils/fsErrors'
 import { logError, logInfo } from '../logging/logger'
+import { mt } from '../i18n/language'
 import type { BackupResult, RestoreResult } from '../../shared/types'
+
+// Yedekleme artık sadece Postgres (Supabase) verisinin JSON dump'ı - döküman dosyaları
+// Supabase Storage'da zaten dayanıklı şekilde saklandığı için burada tekrar indirilmiyor.
+const TABLES = [
+  'bookings',
+  'containers',
+  'documents',
+  'lookup_values',
+  'unassigned_vehicles'
+] as const
+// Restore sırasında FK bağımlılıkları yüzünden silme/ekleme bu sırayla yapılmalı.
+const DELETE_ORDER = [
+  'containers',
+  'documents',
+  'bookings',
+  'lookup_values',
+  'unassigned_vehicles'
+] as const
+const INSERT_ORDER = [
+  'bookings',
+  'containers',
+  'documents',
+  'lookup_values',
+  'unassigned_vehicles'
+] as const
 
 function timestamp(): string {
   const d = new Date()
@@ -19,38 +43,37 @@ function timestamp(): string {
 }
 
 async function buildBackupZip(destZipPath: string): Promise<void> {
-  const tmpDbPath = join(tmpdir(), `halils-portal-backup-${Date.now()}.db`)
+  const supabase = getSupabase()
+  const tmpDir = join(tmpdir(), `lcl-tracking-backup-${Date.now()}`)
+  mkdirSync(tmpDir, { recursive: true })
   try {
-    const db = getDb()
-    await db.backup(tmpDbPath)
-
     const zip = new AdmZip()
-    zip.addLocalFile(tmpDbPath, '', 'halils-portal.db')
-
-    const documentsRoot = getDocumentsRoot()
-    if (existsSync(documentsRoot)) {
-      zip.addLocalFolder(documentsRoot, 'documents')
+    for (const table of TABLES) {
+      const { data, error } = await supabase.from(table).select('*')
+      if (error) throw new Error(mt('errors.tableReadFailed', { table, message: error.message }))
+      const filePath = join(tmpDir, `${table}.json`)
+      writeFileSync(filePath, JSON.stringify(data ?? []), 'utf-8')
+      zip.addLocalFile(filePath, '', `${table}.json`)
     }
-
     zip.writeZip(destZipPath)
   } finally {
-    if (existsSync(tmpDbPath)) rmSync(tmpDbPath, { force: true })
+    if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true })
   }
 }
 
 export async function createBackup(targetFolder: string): Promise<BackupResult> {
   try {
     if (!targetFolder) {
-      return { success: false, error: 'Yedek klasörü seçilmemiş.' }
+      return { success: false, error: mt('errors.noBackupFolderSelected') }
     }
     if (!existsSync(targetFolder)) {
       return {
         success: false,
-        error: `Yedek klasörüne erişilemiyor: ${targetFolder}. Klasörün bağlı/erişilebilir olduğundan emin olun.`
+        error: mt('errors.backupFolderInaccessible', { folder: targetFolder })
       }
     }
 
-    const fileName = `HalilsPortal-Yedek-${timestamp()}.zip`
+    const fileName = `LCLTracking-Yedek-${timestamp()}.zip`
     const destZipPath = join(targetFolder, fileName)
 
     await buildBackupZip(destZipPath)
@@ -67,7 +90,7 @@ export async function createBackup(targetFolder: string): Promise<BackupResult> 
 export async function runConfiguredBackup(): Promise<BackupResult> {
   const config = getBackupConfig()
   if (!config.backupFolder) {
-    return { success: false, error: 'Yedek klasörü henüz ayarlanmamış.' }
+    return { success: false, error: mt('errors.backupFolderNotConfigured') }
   }
 
   const result = await createBackup(config.backupFolder)
@@ -75,7 +98,7 @@ export async function runConfiguredBackup(): Promise<BackupResult> {
   updateBackupConfig({
     lastBackupAt: new Date().toISOString(),
     lastBackupStatus: result.success ? 'success' : 'error',
-    lastBackupError: result.success ? null : (result.error ?? 'Bilinmeyen hata')
+    lastBackupError: result.success ? null : (result.error ?? mt('errors.unknownError'))
   })
 
   return result
@@ -85,65 +108,52 @@ export async function restoreBackup(zipPath: string): Promise<RestoreResult> {
   let tmpExtractDir: string | null = null
   try {
     if (!existsSync(zipPath)) {
-      return { success: false, error: 'Seçilen yedek dosyası bulunamadı.' }
+      return { success: false, error: mt('errors.backupFileNotFound') }
     }
 
-    tmpExtractDir = join(tmpdir(), `halils-portal-restore-${Date.now()}`)
+    tmpExtractDir = join(tmpdir(), `lcl-tracking-restore-${Date.now()}`)
     mkdirSync(tmpExtractDir, { recursive: true })
 
     const zip = new AdmZip(zipPath)
     zip.extractAllTo(tmpExtractDir, true)
 
-    const extractedDbPath = join(tmpExtractDir, 'halils-portal.db')
-    if (!existsSync(extractedDbPath)) {
-      return { success: false, error: 'Geçersiz yedek dosyası: veritabanı bulunamadı.' }
+    const dumps: Partial<Record<(typeof TABLES)[number], unknown[]>> = {}
+    for (const table of TABLES) {
+      const filePath = join(tmpExtractDir, `${table}.json`)
+      if (!existsSync(filePath)) {
+        return { success: false, error: mt('errors.invalidBackupFile', { table }) }
+      }
+      dumps[table] = JSON.parse(readFileSync(filePath, 'utf-8'))
     }
 
     // Geri yükleme öncesi mevcut durumun güvenlik kopyasını al (yanlış dosya seçimine karşı).
-    const preRestoreDir = join(app.getPath('userData'), 'pre-restore-backups')
+    const supabase = getSupabase()
+    const preRestoreDir = join(tmpdir(), 'lcl-tracking-pre-restore-backups')
     mkdirSync(preRestoreDir, { recursive: true })
     const safetyResult = await createBackup(preRestoreDir)
     if (!safetyResult.success) {
       return {
         success: false,
-        error: `Geri yükleme öncesi güvenlik kopyası alınamadı, işlem iptal edildi: ${safetyResult.error}`
+        error: mt('errors.safetyBackupFailed', { error: safetyResult.error ?? '' })
       }
     }
 
-    closeDb()
-
-    const liveDbPath = getDbPath()
-    copyFileSync(extractedDbPath, liveDbPath)
-    for (const ext of ['-wal', '-shm']) {
-      const sidecarPath = liveDbPath + ext
-      if (existsSync(sidecarPath)) rmSync(sidecarPath, { force: true })
+    for (const table of DELETE_ORDER) {
+      const { error } = await supabase.from(table).delete().not('id', 'is', null)
+      if (error) throw new Error(mt('errors.tableClearFailed', { table, message: error.message }))
+    }
+    for (const table of INSERT_ORDER) {
+      const rows = dumps[table] ?? []
+      if (rows.length === 0) continue
+      const { error } = await supabase.from(table).insert(rows)
+      if (error) throw new Error(mt('errors.tableRestoreFailed', { table, message: error.message }))
     }
 
-    const extractedDocsDir = join(tmpExtractDir, 'documents')
-    const liveDocsDir = getDocumentsRoot()
-    try {
-      if (existsSync(liveDocsDir)) {
-        // maxRetries/retryDelay: Windows'ta bir klasör silindikten hemen sonra aynı yola
-        // yazmaya çalışmak EPERM/EBUSY hatası verebilir (antivirüs/OneDrive/gezgin kilidi).
-        rmSync(liveDocsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
-      }
-      // Yedekte documents klasörü olmasa bile (örn. tüm dökümanlar silinmişse), geri yükleme
-      // sonrasında klasörün her zaman var olduğundan emin ol - aksi halde bir sonraki döküman
-      // yükleme/yedekleme işlemi "documents klasörü bulunamadı" tarzı yetki hatası verebilir.
-      mkdirSync(liveDocsDir, { recursive: true })
-      if (existsSync(extractedDocsDir)) {
-        cpSync(extractedDocsDir, liveDocsDir, { recursive: true, force: true })
-      }
-      logInfo('restoreBackup', `Documents klasörü geri yüklendi: ${liveDocsDir}`)
-    } catch (err) {
-      logError('restoreBackup:documents', err, { liveDocsDir, extractedDocsDir })
-      return { success: false, error: describeFsError(err, liveDocsDir) }
-    }
-
+    logInfo('restoreBackup', `Veritabanı geri yüklendi: ${zipPath}`)
     return { success: true }
   } catch (err) {
     logError('restoreBackup', err, { zipPath })
-    return { success: false, error: describeFsError(err, getDocumentsRoot()) }
+    return { success: false, error: describeFsError(err, zipPath) }
   } finally {
     if (tmpExtractDir && existsSync(tmpExtractDir)) {
       rmSync(tmpExtractDir, { recursive: true, force: true })

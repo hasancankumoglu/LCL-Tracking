@@ -1,4 +1,5 @@
 import { useState, type ReactElement } from 'react'
+import { useTranslation } from 'react-i18next'
 import type {
   Booking,
   CarrierBookingSnapshot,
@@ -6,13 +7,8 @@ import type {
   CarrierName,
   CarrierReferenceType
 } from '@shared/types'
-import {
-  CARRIER_LABELS,
-  CARRIER_NAMES,
-  CARRIER_REFERENCE_TYPE_LABELS,
-  CARRIER_REFERENCE_TYPES
-} from '@shared/types'
-import { formatDate } from '../lib/format'
+import { CARRIER_NAMES, CARRIER_REFERENCE_TYPES } from '@shared/types'
+import { formatDate, getErrorMessage } from '../lib/format'
 
 interface Props {
   booking: Booking
@@ -38,6 +34,7 @@ export default function CarrierLookupModal({
   onClose,
   onApplied
 }: Props): React.JSX.Element {
+  const { t } = useTranslation()
   const [step, setStep] = useState<Step>('form')
   const [carrier, setCarrier] = useState<CarrierName>('MAERSK')
   const [referenceType, setReferenceType] = useState<CarrierReferenceType>('BL')
@@ -63,7 +60,7 @@ export default function CarrierLookupModal({
         setSnapshot(result.snapshot)
         setStep('preview')
       } else if (result.status === 'not_found') {
-        setError('Bu referans numarasıyla armatör sisteminde bir kayıt bulunamadı.')
+        setError(t('carriers.recordNotFound'))
       } else if (result.status === 'not_configured') {
         setStep('credentials')
       } else {
@@ -104,9 +101,9 @@ export default function CarrierLookupModal({
         setSnapshot(result.snapshot)
         setStep('preview')
       } else if (result.status === 'not_found') {
-        setError('Genel takip sayfasında da bu referansla bir kayıt bulunamadı.')
+        setError(t('carriers.publicFallbackNotFound'))
       } else if (result.status === 'not_configured') {
-        setError("Genel takip fallback'i bu armatör için desteklenmiyor.")
+        setError(t('carriers.publicFallbackNotSupported'))
       } else {
         setError(result.message)
       }
@@ -124,7 +121,7 @@ export default function CarrierLookupModal({
       await onApplied()
       onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Güncelleme sırasında bir hata oluştu.')
+      setError(getErrorMessage(err, t('carriers.updateErrorGeneric')))
     } finally {
       setApplying(false)
     }
@@ -133,40 +130,40 @@ export default function CarrierLookupModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-panel modal-panel--wide" onClick={(e) => e.stopPropagation()}>
-        <h2>Armatörden Getir</h2>
+        <h2>{t('carriers.fetchFromCarrier')}</h2>
 
         {step === 'form' && (
           <>
             <div className="form-grid">
               <div className="form-field">
-                <label>Armatör</label>
+                <label>{t('carriers.carrierLabel')}</label>
                 <select value={carrier} onChange={(e) => setCarrier(e.target.value as CarrierName)}>
                   {CARRIER_NAMES.map((c) => (
                     <option key={c} value={c}>
-                      {CARRIER_LABELS[c]}
+                      {t(`enums.carrier.${c}`)}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="form-field">
-                <label>Referans Tipi</label>
+                <label>{t('carriers.referenceTypeLabel')}</label>
                 <select
                   value={referenceType}
                   onChange={(e) => setReferenceType(e.target.value as CarrierReferenceType)}
                 >
-                  {CARRIER_REFERENCE_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {CARRIER_REFERENCE_TYPE_LABELS[t]}
+                  {CARRIER_REFERENCE_TYPES.map((t2) => (
+                    <option key={t2} value={t2}>
+                      {t(`enums.carrierReferenceType.${t2}`)}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="form-field full">
-                <label>{CARRIER_REFERENCE_TYPE_LABELS[referenceType]}</label>
+                <label>{t(`enums.carrierReferenceType.${referenceType}`)}</label>
                 <input
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
-                  placeholder="Örn. 277276388"
+                  placeholder={t('carriers.referencePlaceholder')}
                 />
               </div>
             </div>
@@ -176,7 +173,7 @@ export default function CarrierLookupModal({
                 {error}
                 <div style={{ marginTop: 6, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                   <button type="button" className="link-button" onClick={handleChangeCredentials}>
-                    Kimlik bilgilerini güncelle
+                    {t('carriers.updateCredentials')}
                   </button>
                 </div>
               </div>
@@ -184,14 +181,13 @@ export default function CarrierLookupModal({
 
             {carrier === 'MAERSK' && (
               <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 12 }}>
-                Resmi API onayınız bekleniyorsa, aşağıdaki &quot;Genel Takip Sayfası&quot;
-                seçeneğini kullanarak deneysel olarak sorgulayabilirsiniz.
+                {t('carriers.officialApiPendingNote')}
               </div>
             )}
 
             <div className="form-actions">
               <button className="btn secondary" onClick={onClose} disabled={loading}>
-                Vazgeç
+                {t('common.cancel')}
               </button>
               {carrier === 'MAERSK' && (
                 <button
@@ -199,11 +195,11 @@ export default function CarrierLookupModal({
                   onClick={handlePublicFallbackLookup}
                   disabled={loading || !value.trim()}
                 >
-                  {loading ? 'Sorgulanıyor...' : 'Genel Takip Sayfasından Sorgula (deneysel)'}
+                  {loading ? t('carriers.querying') : t('carriers.publicFallbackButton')}
                 </button>
               )}
               <button className="btn" onClick={handleLookup} disabled={loading || !value.trim()}>
-                {loading ? 'Sorgulanıyor...' : 'Resmi API ile Sorgula'}
+                {loading ? t('carriers.querying') : t('carriers.officialApiButton')}
               </button>
             </div>
           </>
@@ -212,9 +208,7 @@ export default function CarrierLookupModal({
         {step === 'credentials' && (
           <>
             <div className="empty-state" style={{ marginBottom: 12 }}>
-              {CARRIER_LABELS[carrier]} API kimlik bilgileri henüz tanımlı değil. Devam etmek için
-              Consumer-Key ve Consumer-Secret&apos;ı girin (bir kere girilir, sonraki sorgularda
-              tekrar sorulmaz).
+              {t('carriers.credentialsNotConfigured', { carrier: t(`enums.carrier.${carrier}`) })}
             </div>
             {carrier === 'MAERSK' && (
               <div style={{ marginBottom: 12 }}>
@@ -224,17 +218,17 @@ export default function CarrierLookupModal({
                   onClick={handlePublicFallbackLookup}
                   disabled={loading}
                 >
-                  Kimlik bilgisi girmeden genel takip sayfasından dene (deneysel)
+                  {t('carriers.tryWithoutCredentials')}
                 </button>
               </div>
             )}
             <div className="form-grid">
               <div className="form-field full">
-                <label>Consumer-Key</label>
+                <label>{t('carriers.consumerKey')}</label>
                 <input value={consumerKey} onChange={(e) => setConsumerKey(e.target.value)} />
               </div>
               <div className="form-field full">
-                <label>Consumer-Secret</label>
+                <label>{t('carriers.consumerSecret')}</label>
                 <input
                   type="password"
                   value={consumerSecret}
@@ -244,14 +238,14 @@ export default function CarrierLookupModal({
             </div>
             <div className="form-actions">
               <button className="btn secondary" onClick={onClose}>
-                Vazgeç
+                {t('common.cancel')}
               </button>
               <button
                 className="btn"
                 onClick={handleSaveCredentials}
                 disabled={!consumerKey.trim() || !consumerSecret.trim()}
               >
-                Kaydet ve Devam Et
+                {t('carriers.saveAndContinue')}
               </button>
             </div>
           </>
@@ -264,31 +258,38 @@ export default function CarrierLookupModal({
                 className="empty-state"
                 style={{ marginBottom: 12, borderColor: '#c0392b', color: '#c0392b' }}
               >
-                Bu veri resmi Maersk API&apos;sinden değil, halka açık takip sayfasından deneysel
-                olarak alınmıştır; doğruluğu garanti edilmez, onaylamadan önce kontrol edin.
+                {t('carriers.publicFallbackWarning')}
               </div>
             )}
             <div className="table-scroll">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Alan</th>
-                    <th>Mevcut</th>
-                    <th>Armatörden Gelen</th>
+                    <th>{t('carriers.fieldColumn')}</th>
+                    <th>{t('carriers.currentColumn')}</th>
+                    <th>{t('carriers.fromCarrierColumn')}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {compareRow('Konşimento (BL) No', booking.blNumber, snapshot.blNumber)}
-                  {compareRow('Booking Referans No', booking.bookingNo, snapshot.bookingReference)}
-                  {compareRow('Gemi Adı', null, snapshot.vesselName)}
-                  {compareRow('IMO No', null, snapshot.imoNumber)}
-                  {compareRow('POL', booking.pol, snapshot.pol)}
-                  {compareRow('Destination', booking.destination, snapshot.destination)}
+                  {compareRow(
+                    t('enums.carrierReferenceType.BL'),
+                    booking.blNumber,
+                    snapshot.blNumber
+                  )}
+                  {compareRow(
+                    t('enums.carrierReferenceType.BOOKING'),
+                    booking.bookingNo,
+                    snapshot.bookingReference
+                  )}
+                  {compareRow(t('carriers.vesselName'), null, snapshot.vesselName)}
+                  {compareRow(t('carriers.imoNo'), null, snapshot.imoNumber)}
+                  {compareRow(t('reports.pol'), booking.pol, snapshot.pol)}
+                  {compareRow(t('reports.destination'), booking.destination, snapshot.destination)}
                   {compareRow('ETD', formatDate(booking.etd), formatDate(snapshot.etd))}
                   {compareRow('ETA', formatDate(booking.eta), formatDate(snapshot.eta))}
-                  {compareRow('Konşimento Durumu', booking.blStatus, snapshot.blStatus)}
+                  {compareRow(t('carriers.blStatus'), booking.blStatus, snapshot.blStatus)}
                   {compareRow(
-                    'Free Time Bitiş',
+                    t('carriers.freeTimeEnd'),
                     formatDate(booking.freeTimeEnd),
                     formatDate(snapshot.freeTimeEnd)
                   )}
@@ -297,13 +298,15 @@ export default function CarrierLookupModal({
             </div>
 
             <div className="import-preview-section">
-              <strong>Konteynerlar ({snapshot.containers.length})</strong>
+              <strong>
+                {t('carriers.containersCount', { count: snapshot.containers.length })}
+              </strong>
               <div className="table-scroll import-preview-table-scroll">
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Konteyner No</th>
-                      <th>Ekipman Tipi</th>
+                      <th>{t('carriers.containerNo')}</th>
+                      <th>{t('carriers.equipmentType')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -317,8 +320,7 @@ export default function CarrierLookupModal({
                 </table>
               </div>
               <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 6 }}>
-                Yalnızca bu bookingdeki mevcut konteyner numaralarıyla eşleşenler güncellenecek;
-                eşleşmeyen numaralar için yeni konteyner oluşturulmayacak.
+                {t('carriers.matchNote')}
               </div>
             </div>
 
@@ -326,10 +328,10 @@ export default function CarrierLookupModal({
 
             <div className="form-actions">
               <button className="btn secondary" onClick={() => setStep('form')} disabled={applying}>
-                Geri
+                {t('common.back')}
               </button>
               <button className="btn" onClick={handleApply} disabled={applying}>
-                {applying ? 'Güncelleniyor...' : 'Onayla ve Güncelle'}
+                {applying ? t('carriers.updating') : t('carriers.confirmAndUpdate')}
               </button>
             </div>
           </>

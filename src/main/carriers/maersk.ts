@@ -1,5 +1,6 @@
 import { getCarrierCredentials } from './config'
 import { getMaerskAccessToken } from './maerskAuth'
+import { mt } from '../i18n/language'
 import type {
   CarrierBookingSnapshot,
   CarrierLookupResult,
@@ -147,7 +148,9 @@ export async function lookupMaerskBooking(
   } catch (err) {
     return {
       status: 'error',
-      message: `Maersk API'sine bağlanılamadı: ${err instanceof Error ? err.message : String(err)}`
+      message: mt('errors.maerskConnectionFailed', {
+        message: err instanceof Error ? err.message : String(err)
+      })
     }
   }
 
@@ -157,11 +160,11 @@ export async function lookupMaerskBooking(
   if (response.status === 429) {
     return {
       status: 'error',
-      message: 'Maersk API istek limiti aşıldı, lütfen daha sonra tekrar deneyin.'
+      message: mt('errors.maerskRateLimited')
     }
   }
   if (!response.ok) {
-    return { status: 'error', message: `Maersk API hatası (HTTP ${response.status}).` }
+    return { status: 'error', message: mt('errors.maerskApiError', { status: response.status }) }
   }
 
   const events = (await response.json()) as DcsaEvent[]

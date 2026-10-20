@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import CreatableSelect from 'react-select/creatable'
 import type { StylesConfig } from 'react-select'
 
@@ -72,6 +73,7 @@ export default function SearchableSelect({
   placeholder,
   required
 }: Props): React.JSX.Element {
+  const { t } = useTranslation()
   const selectOptions = useMemo<Option[]>(
     () => options.map((o) => ({ value: o, label: o })),
     [options]
@@ -101,8 +103,8 @@ export default function SearchableSelect({
       onChange={handleChange}
       onCreateOption={handleCreate}
       placeholder={placeholder}
-      formatCreateLabel={(input) => `+ "${input}" listeye ekle`}
-      noOptionsMessage={() => 'Kayıtlı değer yok'}
+      formatCreateLabel={(input) => t('misc.createOption', { input })}
+      noOptionsMessage={() => t('misc.noOptions')}
     />
   )
 }

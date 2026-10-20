@@ -1,8 +1,18 @@
 export const IPC = {
+  APP_GET_VERSION: 'app:getVersion',
+  UPDATE_GET_STATE: 'update:getState',
+  UPDATE_STATE_CHANGED: 'update:stateChanged',
+  UPDATE_DOWNLOAD: 'update:download',
+  UPDATE_INSTALL: 'update:install',
+
+  UI_LANGUAGE_GET: 'ui:getLanguage',
+  UI_LANGUAGE_SET: 'ui:setLanguage',
+
   BOOKINGS_LIST: 'bookings:list',
   BOOKINGS_GET: 'bookings:get',
   BOOKINGS_GET_BY_NO: 'bookings:getByNo',
   BOOKINGS_CREATE: 'bookings:create',
+  BOOKINGS_CREATE_WITH_VEHICLES: 'bookings:createWithVehicles',
   BOOKINGS_UPDATE: 'bookings:update',
   BOOKINGS_DELETE: 'bookings:delete',
   BOOKINGS_LIST_ARCHIVED: 'bookings:listArchived',
@@ -14,11 +24,6 @@ export const IPC = {
   CONTAINERS_DELETE: 'containers:delete',
   CONTAINERS_FIND_CONFLICTS: 'containers:findConflicts',
   CONTAINERS_LIST_FOR_TRACKING: 'containers:listForTracking',
-
-  UNASSIGNED_VEHICLES_LIST: 'unassignedVehicles:list',
-  UNASSIGNED_VEHICLES_DELETE: 'unassignedVehicles:delete',
-  UNASSIGNED_VEHICLES_ASSIGN: 'unassignedVehicles:assign',
-  UNASSIGNED_VEHICLES_CREATE: 'unassignedVehicles:create',
 
   DOCUMENTS_LIST_BY_BOOKING: 'documents:listByBooking',
   DOCUMENTS_ADD: 'documents:add',
@@ -37,6 +42,11 @@ export const IPC = {
   LOOKUPS_LIST: 'lookups:list',
   LOOKUPS_ADD: 'lookups:add',
 
+  UNASSIGNED_VEHICLES_LIST: 'unassignedVehicles:list',
+  UNASSIGNED_VEHICLES_CREATE: 'unassignedVehicles:create',
+  UNASSIGNED_VEHICLES_DELETE: 'unassignedVehicles:delete',
+  UNASSIGNED_VEHICLES_ASSIGN: 'unassignedVehicles:assign',
+
   BACKUP_GET_CONFIG: 'backup:getConfig',
   BACKUP_PICK_FOLDER: 'backup:pickFolder',
   BACKUP_RUN_NOW: 'backup:runNow',
@@ -50,11 +60,43 @@ export const IPC = {
   REPORTS_EXPORT_RANGE_WORD: 'reports:exportRangeWord',
   REPORTS_SEND_BOOKING_EMAIL: 'reports:sendBookingEmail',
   REPORTS_SEND_RANGE_EMAIL: 'reports:sendRangeEmail',
+  REPORTS_SEND_OPERATOR_EMAIL: 'reports:sendOperatorEmail',
 
   CARRIERS_LOOKUP: 'carriers:lookup',
   CARRIERS_LOOKUP_PUBLIC_FALLBACK: 'carriers:lookupPublicFallback',
   CARRIERS_APPLY: 'carriers:apply',
   CARRIERS_HAS_CREDENTIALS: 'carriers:hasCredentials',
   CARRIERS_SET_CREDENTIALS: 'carriers:setCredentials',
-  CARRIERS_CLEAR_CREDENTIALS: 'carriers:clearCredentials'
+  CARRIERS_CLEAR_CREDENTIALS: 'carriers:clearCredentials',
+
+  AUTH_LOGIN: 'auth:login',
+  AUTH_LOGOUT: 'auth:logout',
+  AUTH_CHANGE_PASSWORD: 'auth:changePassword',
+  AUTH_GET_REMEMBERED_USERNAME: 'auth:getRememberedUsername',
+  AUTH_SET_REMEMBERED_USERNAME: 'auth:setRememberedUsername',
+
+  USERS_LIST: 'users:list',
+  USERS_LIST_DIRECTORY: 'users:listDirectory',
+  USERS_CREATE: 'users:create',
+  USERS_SET_EMAIL: 'users:setEmail',
+  USERS_SET_PASSWORD: 'users:setPassword',
+  USERS_UPDATE_ROLE: 'users:updateRole',
+  USERS_SET_ACTIVE: 'users:setActive',
+  USERS_GET_ROLE_PERMISSIONS: 'users:getRolePermissions',
+  USERS_SET_ROLE_PERMISSION: 'users:setRolePermission',
+  USERS_GET_USER_PERMISSIONS: 'users:getUserPermissions',
+  USERS_SET_USER_PERMISSION: 'users:setUserPermission',
+
+  PENDING_DELETIONS_LIST: 'pendingDeletions:list',
+  PENDING_DELETIONS_LIST_ACTIVE_BOOKING_IDS: 'pendingDeletions:listActiveBookingIds',
+  PENDING_DELETIONS_APPROVE: 'pendingDeletions:approve',
+  PENDING_DELETIONS_REJECT: 'pendingDeletions:reject',
+  PENDING_DELETIONS_WITHDRAW: 'pendingDeletions:withdraw',
+
+  CUSTOMERS_LIST: 'customers:list',
+  CUSTOMERS_GET: 'customers:get',
+  CUSTOMERS_LIST_DIRECTORY: 'customers:listDirectory',
+  CUSTOMERS_CREATE: 'customers:create',
+  CUSTOMERS_UPDATE: 'customers:update',
+  CUSTOMERS_DELETE: 'customers:delete'
 } as const

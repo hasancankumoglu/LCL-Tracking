@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { BackupConfig } from '@shared/types'
-
-function formatDateTime(iso: string | null): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString('tr-TR')
-}
+import { useGlobalLoading } from '../lib/loadingOverlay'
+import { formatDateTime } from '../lib/format'
 
 function formatSize(bytes?: number): string {
   if (!bytes) return ''
@@ -13,8 +11,10 @@ function formatSize(bytes?: number): string {
 }
 
 export default function BackupPage(): React.JSX.Element {
+  const { t } = useTranslation()
   const [config, setConfig] = useState<BackupConfig | null>(null)
   const [loading, setLoading] = useState(true)
+  useGlobalLoading(loading)
   const [backingUp, setBackingUp] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -44,10 +44,13 @@ export default function BackupPage(): React.JSX.Element {
     if (result.success) {
       setMessage({
         type: 'success',
-        text: `Yedek alındı: ${result.filePath} (${formatSize(result.sizeBytes)})`
+        text: t('backup.backupTakenMessage', {
+          path: result.filePath,
+          size: formatSize(result.sizeBytes)
+        })
       })
     } else {
-      setMessage({ type: 'error', text: result.error ?? 'Yedekleme başarısız oldu.' })
+      setMessage({ type: 'error', text: result.error ?? t('backup.backupFailedMessage') })
     }
     await refresh()
   }
@@ -56,9 +59,7 @@ export default function BackupPage(): React.JSX.Element {
     const zipPath = await window.api.backup.pickRestoreFile()
     if (!zipPath) return
 
-    const confirmed = window.confirm(
-      `Bu işlem mevcut tüm booking, konteyner ve döküman verilerinin üzerine yazacak.\n\nSeçilen dosya: ${zipPath}\n\nGeri yüklemeden önce mevcut durumun güvenlik kopyası otomatik alınacak. Devam etmek istiyor musunuz?`
-    )
+    const confirmed = window.confirm(t('backup.restoreConfirm', { path: zipPath }))
     if (!confirmed) return
 
     setMessage(null)
@@ -66,7 +67,7 @@ export default function BackupPage(): React.JSX.Element {
     const result = await window.api.backup.restore(zipPath)
     if (!result.success) {
       setRestoring(false)
-      setMessage({ type: 'error', text: result.error ?? 'Geri yükleme başarısız oldu.' })
+      setMessage({ type: 'error', text: result.error ?? t('backup.restoreFailedMessage') })
     }
     // Başarılı olursa uygulama kısa süre içinde otomatik yeniden başlayacak.
   }
@@ -74,33 +75,32 @@ export default function BackupPage(): React.JSX.Element {
   return (
     <div>
       <div className="page-title">
-        <h1>Yedekleme</h1>
+        <h1>{t('nav.backup')}</h1>
       </div>
 
       <div
         className="surface"
         style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}
       >
-        {loading ? (
-          <div className="empty-state">Yükleniyor...</div>
-        ) : (
+        {loading ? null : (
           <>
             <div className="form-field">
-              <label>Yedek Klasörü</label>
+              <label>{t('backup.folderLabel')}</label>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <span style={{ flex: 1 }}>{config?.backupFolder ?? 'Henüz seçilmedi'}</span>
+                <span style={{ flex: 1 }}>{config?.backupFolder ?? t('backup.notSelected')}</span>
                 <button className="btn secondary small" onClick={handlePickFolder}>
-                  Klasör Seç
+                  {t('backup.selectFolder')}
                 </button>
               </div>
             </div>
 
             <div>
               <div>
-                Son yedek: <strong>{formatDateTime(config?.lastBackupAt ?? null)}</strong>
+                {t('backup.lastBackup')}{' '}
+                <strong>{formatDateTime(config?.lastBackupAt ?? null)}</strong>
                 {config?.lastBackupStatus === 'success' && (
                   <span className="badge badge-status-tamamlandi" style={{ marginLeft: 8 }}>
-                    Başarılı
+                    {t('common.success')}
                   </span>
                 )}
                 {config?.lastBackupStatus === 'error' && (
@@ -108,7 +108,7 @@ export default function BackupPage(): React.JSX.Element {
                     className="badge"
                     style={{ marginLeft: 8, background: '#fbe4e4', color: '#c0392b' }}
                   >
-                    Hatalı
+                    {t('backup.failed')}
                   </span>
                 )}
               </div>
@@ -131,24 +131,17 @@ export default function BackupPage(): React.JSX.Element {
                 onClick={handleBackupNow}
                 disabled={backingUp || !config?.backupFolder}
               >
-                {backingUp ? 'Yedekleniyor...' : 'Şimdi Yedekle'}
+                {backingUp ? t('backup.backingUp') : t('backup.backupNow')}
               </button>
               <button className="btn danger" onClick={handleRestore} disabled={restoring}>
-                {restoring ? 'Geri Yükleniyor...' : 'Yedekten Geri Yükle'}
+                {restoring ? t('backup.restoring') : t('backup.restoreButton')}
               </button>
               <button className="btn secondary" onClick={() => window.api.backup.openLogsFolder()}>
-                Log Klasörünü Aç
+                {t('backup.openLogsFolder')}
               </button>
             </div>
 
-            <p style={{ opacity: 0.7, fontSize: 13 }}>
-              Yedekler, uygulama açılışında ve kapanışında seçtiğiniz klasöre otomatik olarak
-              alınır. Ayrıca dilediğiniz zaman &quot;Şimdi Yedekle&quot; ile manuel yedek
-              alabilirsiniz. Geri yükleme işlemi, mevcut tüm verilerin üzerine yazar; bu yüzden
-              işlem öncesi mevcut durumun bir güvenlik kopyası otomatik olarak alınır. Bir sorunla
-              karşılaşırsanız &quot;Log Klasörünü Aç&quot; ile açılan app.log dosyasını destek için
-              paylaşabilirsiniz.
-            </p>
+            <p style={{ opacity: 0.7, fontSize: 13 }}>{t('backup.helpText')}</p>
           </>
         )}
       </div>

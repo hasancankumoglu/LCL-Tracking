@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ContainerWithBooking } from '@shared/types'
 import VesselTrackingSection from './VesselTrackingSection'
 
@@ -36,16 +37,17 @@ function VesselListItem({
   active: boolean
   onClick: () => void
 }): React.JSX.Element {
+  const { t } = useTranslation()
   const trackable = hasVesselInfo(c)
   return (
     <div
       onClick={onClick}
       className={`upcoming-item ${active ? 'active' : ''} ${trackable ? '' : 'disabled'}`}
-      title={trackable ? undefined : 'Bu konteynere gemi bilgisi girilmedi'}
+      title={trackable ? undefined : t('vesselTracking.noVesselInfo')}
     >
       <div className="upcoming-item__main">
         <span className="upcoming-item__bookingno">
-          {c.vesselName || c.containerNo || 'Konteyner'}
+          {c.vesselName || c.containerNo || t('vesselTracking.containerFallback')}
         </span>
         <span className="upcoming-item__meta">
           {c.containerNo || '-'} ({c.type})
@@ -61,6 +63,7 @@ export default function VesselTrackingPanel({
   initialContainerId = null,
   mapHeight = 420
 }: Props): React.JSX.Element {
+  const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [collapsedBookingIds, setCollapsedBookingIds] = useState<Set<number>>(() => new Set())
   const [selectedContainerId, setSelectedContainerId] = useState<number | null>(initialContainerId)
@@ -142,12 +145,7 @@ export default function VesselTrackingPanel({
   }
 
   if (containers.length === 0) {
-    return (
-      <div className="empty-state">
-        Takip edilebilir konteyner bulunamadı. Konteynere gemi bilgisi (Gemi Adı / IMO / MMSI)
-        ekleyin.
-      </div>
-    )
+    return <div className="empty-state">{t('vesselTracking.noTrackableContainers')}</div>
   }
 
   return (
@@ -157,7 +155,7 @@ export default function VesselTrackingPanel({
           <div className="vessel-tree-search">
             <input
               className="text-input"
-              placeholder="Booking, konteyner veya gemi ara..."
+              placeholder={t('vesselTracking.searchPlaceholder')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -206,7 +204,7 @@ export default function VesselTrackingPanel({
                 />
               ))}
           {groupByBooking && filteredGroups.length === 0 && (
-            <div className="empty-state">Sonuç bulunamadı.</div>
+            <div className="empty-state">{t('vesselTracking.noResults')}</div>
           )}
         </div>
       </div>
@@ -215,8 +213,9 @@ export default function VesselTrackingPanel({
         <div className="section-title">
           <h2>
             {selected
-              ? selected.vesselName || `Konteyner ${selected.containerNo ?? ''}`
-              : 'Gemi Takip'}
+              ? selected.vesselName ||
+                t('vesselTracking.containerTitle', { no: selected.containerNo ?? '' })
+              : t('vesselTracking.title')}
           </h2>
         </div>
         <div className="section-body">
@@ -228,7 +227,7 @@ export default function VesselTrackingPanel({
               height={mapHeight}
             />
           ) : (
-            <div className="empty-state">Takip edilebilir gemi bulunamadı.</div>
+            <div className="empty-state">{t('vesselTracking.noTrackableVessel')}</div>
           )}
         </div>
       </div>

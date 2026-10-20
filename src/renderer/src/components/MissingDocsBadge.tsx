@@ -1,5 +1,5 @@
+import { useTranslation } from 'react-i18next'
 import type { DocumentType } from '@shared/types'
-import { DOCUMENT_TYPE_LABELS } from '@shared/types'
 
 /**
  * Bir booking için eksik döküman durumunu hızlıca gösteren rozet.
@@ -11,13 +11,14 @@ export default function MissingDocsBadge({
 }: {
   missing: DocumentType[]
 }): React.JSX.Element {
+  const { t } = useTranslation()
   if (missing.length === 0) {
-    return <span className="badge badge-docs-complete">Tam</span>
+    return <span className="badge badge-docs-complete">{t('misc.missingDocsComplete')}</span>
   }
-  const labels = missing.map((t) => DOCUMENT_TYPE_LABELS[t]).join(', ')
+  const labels = missing.map((d) => t(`enums.documentType.${d}`)).join(', ')
   return (
-    <span className="badge badge-docs-missing" title={`Eksik: ${labels}`}>
-      {missing.length} Eksik
+    <span className="badge badge-docs-missing" title={t('misc.missingDocsTitle', { labels })}>
+      {t('misc.missingDocsBadge', { count: missing.length })}
     </span>
   )
 }

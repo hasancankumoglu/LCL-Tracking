@@ -1,6 +1,7 @@
 import type { CarrierLookupResult, CarrierName, CarrierReferenceType } from '../../shared/types'
 import { lookupMaerskBooking } from './maersk'
 import { lookupMaerskPublicTracking } from './maerskPublic'
+import { mt } from '../i18n/language'
 
 /** Armatör adına göre doğru adaptöre yönlendirir. Yeni armatör eklendiğinde buraya bir case eklenir. */
 export function lookupCarrierBooking(
@@ -12,7 +13,10 @@ export function lookupCarrierBooking(
     case 'MAERSK':
       return lookupMaerskBooking(referenceType, value)
     default:
-      return Promise.resolve({ status: 'error', message: `Desteklenmeyen armatör: ${carrier}` })
+      return Promise.resolve({
+        status: 'error',
+        message: mt('errors.unsupportedCarrier', { carrier })
+      })
   }
 }
 
@@ -32,7 +36,7 @@ export function lookupCarrierPublicFallback(
     default:
       return Promise.resolve({
         status: 'error',
-        message: `Bu armatör için genel takip fallback'i desteklenmiyor: ${carrier}`
+        message: mt('errors.publicFallbackNotSupportedFor', { carrier })
       })
   }
 }

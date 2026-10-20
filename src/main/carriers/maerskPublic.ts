@@ -2,6 +2,7 @@ import { BrowserWindow } from 'electron'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { mt } from '../i18n/language'
 import type {
   CarrierBookingSnapshot,
   CarrierLookupResult,
@@ -210,7 +211,7 @@ export async function lookupMaerskPublicTracking(
 ): Promise<CarrierLookupResult> {
   const trimmed = value.trim()
   if (!trimmed) {
-    return { status: 'error', message: 'Referans numarası boş olamaz.' }
+    return { status: 'error', message: mt('errors.emptyReferenceNumber') }
   }
 
   const key = buildKey(referenceType, trimmed)
@@ -220,7 +221,7 @@ export async function lookupMaerskPublicTracking(
     const waitSec = Math.ceil((COOLDOWN_MS - (now - last)) / 1000)
     return {
       status: 'error',
-      message: `Bu referans için az önce genel takip sayfasından sorgu yapıldı. Lütfen ${waitSec} saniye sonra tekrar deneyin.`
+      message: mt('errors.publicTrackingCooldown', { seconds: waitSec })
     }
   }
   lastQueryAtByKey.set(key, now)
@@ -281,7 +282,7 @@ export async function lookupMaerskPublicTracking(
     if (!state) {
       return {
         status: 'error',
-        message: 'Genel takip sayfası zaman aşımına uğradı, sonuç doğrulanamadı.'
+        message: mt('errors.publicTrackingTimeout')
       }
     }
 
@@ -298,13 +299,14 @@ export async function lookupMaerskPublicTracking(
 
     return {
       status: 'error',
-      message:
-        'Genel takip sayfasından veri okunamadı (sayfa yapısı değişmiş veya erişim engellenmiş olabilir). Resmi API onayınızı bekleyin veya daha sonra tekrar deneyin.'
+      message: mt('errors.publicTrackingParseFailed')
     }
   } catch (err) {
     return {
       status: 'error',
-      message: `Genel takip sayfasına erişilemedi: ${err instanceof Error ? err.message : String(err)}`
+      message: mt('errors.publicTrackingAccessFailed', {
+        message: err instanceof Error ? err.message : String(err)
+      })
     }
   } finally {
     if (win && !win.isDestroyed()) {

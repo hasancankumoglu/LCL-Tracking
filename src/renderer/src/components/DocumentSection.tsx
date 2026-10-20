@@ -1,12 +1,23 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { AppDocument, DocumentType } from '@shared/types'
 import { DOCUMENT_ALLOWED_EXTENSIONS } from '@shared/types'
 import Lightbox from './Lightbox'
 import DocumentUploadPreviewModal, { type PendingDocumentFile } from './DocumentUploadPreviewModal'
 
+interface AddButtonState {
+  onClick: () => void
+  disabled: boolean
+  label: string
+}
+
 interface Props {
   bookingId: number
   type: DocumentType
+  onChange?: () => void
+  onAddButtonChange?: (state: AddButtonState) => void
+  /** true ise yükleme/silme kontrolleri gizlenir, sadece görüntüleme/indirme kalır (Customer rolü). */
+  readOnly?: boolean
 }
 
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']
@@ -26,7 +37,14 @@ function hasAllowedExtension(fileName: string): boolean {
   return DOCUMENT_ALLOWED_EXTENSIONS.includes(ext)
 }
 
-export default function DocumentSection({ bookingId, type }: Props): React.JSX.Element {
+export default function DocumentSection({
+  bookingId,
+  type,
+  onChange,
+  onAddButtonChange,
+  readOnly
+}: Props): React.JSX.Element {
+  const { t } = useTranslation()
   const [documents, setDocuments] = useState<AppDocument[]>([])
   const [preview, setPreview] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -52,6 +70,16 @@ export default function DocumentSection({ bookingId, type }: Props): React.JSX.E
   function handleCloseUploadPicker(): void {
     setShowUploadPicker(false)
   }
+
+  useEffect(() => {
+    if (readOnly) return
+    onAddButtonChange?.({
+      onClick: handleOpenUploadPicker,
+      disabled: uploading,
+      label: uploading ? t('common.loading') : t('documents.addFileButton')
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploading, t, readOnly])
 
   async function handleAdd(): Promise<void> {
     const paths = await window.api.documents.pickFiles()
@@ -94,20 +122,20 @@ export default function DocumentSection({ bookingId, type }: Props): React.JSX.E
     try {
       await window.api.documents.add(bookingId, type, paths)
       await refresh()
+      onChange?.()
       setPendingFiles(null)
       setShowUploadPicker(false)
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Döküman yüklenirken bir hata oluştu.')
     } finally {
       setUploading(false)
     }
   }
 
   async function handleRemove(id: number): Promise<void> {
-    const confirmed = window.confirm('Bu dökümanı silmek istediğinize emin misiniz?')
+    const confirmed = window.confirm(t('documents.confirmDelete'))
     if (!confirmed) return
     await window.api.documents.remove(id)
     await refresh()
+    onChange?.()
   }
 
   function handleOpen(doc: AppDocument): void {
@@ -124,13 +152,8 @@ export default function DocumentSection({ bookingId, type }: Props): React.JSX.E
 
   return (
     <div>
-      <div className="containers-toolbar">
-        <button className="btn small" onClick={handleOpenUploadPicker} disabled={uploading}>
-          {uploading ? 'Yükleniyor...' : '+ Resim/Dosya Ekle'}
-        </button>
-      </div>
       {documents.length === 0 ? (
-        <div className="empty-state">Bu tür için henüz döküman eklenmedi.</div>
+        <div className="empty-state">{t('documents.noDocsYet')}</div>
       ) : (
         <div className="doc-gallery">
           {documents.map((doc) => (
@@ -138,28 +161,30 @@ export default function DocumentSection({ bookingId, type }: Props): React.JSX.E
               {isImage(doc.originalFileName) ? (
                 <img
                   src={window.api.documents.toFileUrl(doc.filePath)}
-                  alt={doc.originalFileName ?? 'döküman'}
+                  alt={doc.originalFileName ?? t('documents.documentAlt')}
                   onClick={() => handleOpen(doc)}
                 />
               ) : (
                 <div className="doc-thumb__file" onClick={() => handleOpen(doc)}>
-                  {doc.originalFileName ?? 'Dosya'}
+                  {doc.originalFileName ?? t('documents.file')}
                 </div>
               )}
               <button
                 className="doc-thumb__download"
-                title="İndir"
+                title={t('common.download')}
                 onClick={() => handleDownload(doc)}
               >
                 ⭳
               </button>
-              <button
-                className="doc-thumb__remove"
-                title="Sil"
-                onClick={() => handleRemove(doc.id)}
-              >
-                ×
-              </button>
+              {!readOnly && (
+                <button
+                  className="doc-thumb__remove"
+                  title={t('common.delete')}
+                  onClick={() => handleRemove(doc.id)}
+                >
+                  ×
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -168,7 +193,7 @@ export default function DocumentSection({ bookingId, type }: Props): React.JSX.E
       {showUploadPicker && !pendingFiles && (
         <div className="modal-overlay" onClick={handleCloseUploadPicker}>
           <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
-            <h2>Döküman Ekle</h2>
+            <h2>{t('documents.addDocumentTitle')}</h2>
             <div
               className={`dropzone dropzone--large${isDragging ? ' dropzone--active' : ''}`}
               onDragOver={handleDragOver}
@@ -178,11 +203,11 @@ export default function DocumentSection({ bookingId, type }: Props): React.JSX.E
               role="button"
               tabIndex={0}
             >
-              Dosyaları buraya sürükleyip bırakın ya da tıklayarak seçin
+              {t('documents.dropzoneHint')}
             </div>
             <div className="form-actions">
               <button className="btn secondary" onClick={handleCloseUploadPicker}>
-                Vazgeç
+                {t('common.cancel')}
               </button>
             </div>
           </div>

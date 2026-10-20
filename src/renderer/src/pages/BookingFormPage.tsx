@@ -1,8 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
-import type { BookingInput, LookupFieldType } from '@shared/types'
-import { BOOKING_STATUSES, BOOKING_STATUS_LABELS, LOOKUP_FIELD_TYPES } from '@shared/types'
+import { useTranslation } from 'react-i18next'
+import type {
+  Booking,
+  BookingInput,
+  LookupFieldType,
+  CustomerDirectoryEntry,
+  UnassignedVehicleSelection
+} from '@shared/types'
+import { BOOKING_STATUSES, LOOKUP_FIELD_TYPES } from '@shared/types'
 import SearchableSelect from '../components/SearchableSelect'
+import { getErrorMessage } from '../lib/format'
 
 const emptyForm: BookingInput = {
   bookingNo: '',
@@ -16,12 +24,14 @@ const emptyForm: BookingInput = {
   status: 'YUKLENMEDI',
   archived: false,
   notes: '',
+  unit: null,
   blNumber: null,
   eta: null,
   etd: null,
   blStatus: null,
   freeTimeEnd: null,
-  lastCarrierSyncAt: null
+  lastCarrierSyncAt: null,
+  customerId: null
 }
 
 const emptyLookupOptions: Record<LookupFieldType, string[]> = {
@@ -32,14 +42,57 @@ const emptyLookupOptions: Record<LookupFieldType, string[]> = {
 }
 
 export default function BookingFormPage(): React.JSX.Element {
+  const { t } = useTranslation()
   const { id } = useParams()
   const isEdit = Boolean(id)
   const navigate = useNavigate()
-  const [form, setForm] = useState<BookingInput>(emptyForm)
+  return (
+    <div>
+      <div className="breadcrumb">
+        <Link to="/bookings">{t('nav.bookings')}</Link> /{' '}
+        {isEdit ? t('bookingForm.editBreadcrumb') : t('bookingForm.newBookingTitle')}
+      </div>
+      <div className="page-title">
+        <h1>{isEdit ? t('bookingForm.editTitle') : t('bookingForm.newBookingTitle')}</h1>
+      </div>
+      <BookingForm
+        bookingId={id ? Number(id) : undefined}
+        onSaved={(booking) => navigate(`/bookings/${booking.id}`)}
+        onCancel={() => navigate(isEdit ? `/bookings/${id}` : '/bookings')}
+      />
+    </div>
+  )
+}
+
+interface BookingFormProps {
+  bookingId?: number
+  vehicles?: UnassignedVehicleSelection[]
+  onSaved: (booking: Booking) => void
+  onCancel: () => void
+}
+
+export function BookingForm({
+  bookingId,
+  vehicles,
+  onSaved,
+  onCancel
+}: BookingFormProps): React.JSX.Element {
+  const { t } = useTranslation()
+  const selectedVehicleCount = vehicles?.length ?? 0
+  const [form, setForm] = useState<BookingInput>(() => ({
+    ...emptyForm,
+    unit: selectedVehicleCount > 0 ? selectedVehicleCount : null
+  }))
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [lookupOptions, setLookupOptions] =
     useState<Record<LookupFieldType, string[]>>(emptyLookupOptions)
+  const [existingContainerCount, setExistingContainerCount] = useState(0)
+  const [customers, setCustomers] = useState<CustomerDirectoryEntry[]>([])
+
+  useEffect(() => {
+    window.api.customers.listDirectory().then(setCustomers)
+  }, [])
 
   useEffect(() => {
     Promise.all(LOOKUP_FIELD_TYPES.map((fieldType) => window.api.lookups.list(fieldType))).then(
@@ -59,8 +112,11 @@ export default function BookingFormPage(): React.JSX.Element {
   }
 
   useEffect(() => {
-    if (!id) return
-    window.api.bookings.get(Number(id)).then((booking) => {
+    if (bookingId === undefined) return
+    window.api.containers.listByBooking(bookingId).then((list) => {
+      setExistingContainerCount(list.length)
+    })
+    window.api.bookings.get(bookingId).then((booking) => {
       if (booking) {
         setForm({
           bookingNo: booking.bookingNo,
@@ -74,16 +130,18 @@ export default function BookingFormPage(): React.JSX.Element {
           status: booking.status,
           archived: booking.archived,
           notes: booking.notes ?? '',
+          unit: booking.unit,
           blNumber: booking.blNumber,
           eta: booking.eta,
           etd: booking.etd,
           blStatus: booking.blStatus,
           freeTimeEnd: booking.freeTimeEnd,
-          lastCarrierSyncAt: booking.lastCarrierSyncAt
+          lastCarrierSyncAt: booking.lastCarrierSyncAt,
+          customerId: booking.customerId
         })
       }
     })
-  }, [id])
+  }, [bookingId])
 
   function update<K extends keyof BookingInput>(key: K, value: BookingInput[K]): void {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -95,18 +153,27 @@ export default function BookingFormPage(): React.JSX.Element {
 
     const bookingNo = form.bookingNo.trim()
     if (!bookingNo) {
-      setError('Booking numarası zorunludur.')
+      setError(t('bookingForm.bookingNoRequiredError'))
       return
     }
 
     const missingFields: string[] = []
-    if (!form.vesselDeparture) missingFields.push('Vessel Departure')
-    if (!form.declarationCutOff) missingFields.push('Declaration Cut Off')
-    if (!form.siCutOff) missingFields.push('SI Cut Off')
-    if (!(form.destination ?? '').trim()) missingFields.push('Destination')
-    if (!(form.pol ?? '').trim()) missingFields.push('POL')
+    if (!form.vesselDeparture) missingFields.push(t('reports.vesselDeparture'))
+    if (!form.declarationCutOff) missingFields.push(t('reports.declarationCutOff'))
+    if (!form.siCutOff) missingFields.push(t('reports.siCutOff'))
+    if (!(form.destination ?? '').trim()) missingFields.push(t('reports.destination'))
+    if (!(form.pol ?? '').trim()) missingFields.push(t('reports.pol'))
     if (missingFields.length > 0) {
-      setError(`Şu alanlar zorunludur: ${missingFields.join(', ')}.`)
+      setError(t('containers.requiredFieldsMessage', { fields: missingFields.join(', ') }))
+      return
+    }
+
+    if (form.unit != null && form.unit < existingContainerCount) {
+      setError(t('bookingForm.unitLessThanContainers', { count: existingContainerCount }))
+      return
+    }
+    if (selectedVehicleCount > 0 && (form.unit ?? 0) < selectedVehicleCount) {
+      setError(t('unassignedVehicles.unitTooSmall', { count: selectedVehicleCount }))
       return
     }
 
@@ -116,14 +183,14 @@ export default function BookingFormPage(): React.JSX.Element {
       form.declarationCutOff &&
       form.declarationCutOff > form.vesselDeparture
     ) {
-      dateIssues.push('Declaration Cut Off tarihi, Vessel Departure tarihinden sonra.')
+      dateIssues.push(t('bookingForm.declarationAfterDeparture'))
     }
     if (form.vesselDeparture && form.siCutOff && form.siCutOff > form.vesselDeparture) {
-      dateIssues.push('SI Cut Off tarihi, Vessel Departure tarihinden sonra.')
+      dateIssues.push(t('bookingForm.siAfterDeparture'))
     }
     if (dateIssues.length > 0) {
       const proceed = window.confirm(
-        `Uyarı: Tarihlerde tutarsızlık tespit edildi:\n- ${dateIssues.join('\n- ')}\n\nBu, kapanış tarihinin gemi kalkışından sonraya yazıldığı anlamına gelebilir (olası veri girişi hatası). Yine de kaydetmek istiyor musunuz?`
+        t('bookingForm.dateWarningConfirm', { issues: dateIssues.join('\n- ') })
       )
       if (!proceed) return
     }
@@ -131,23 +198,25 @@ export default function BookingFormPage(): React.JSX.Element {
     setSaving(true)
     try {
       const existing = await window.api.bookings.getByNo(bookingNo)
-      if (existing && existing.id !== Number(id)) {
-        setError('Bu booking numarası zaten kayıtlı.')
+      if (existing && existing.id !== bookingId) {
+        setError(t('bookingForm.duplicateBookingNo'))
         return
       }
 
-      if (isEdit) {
-        const updated = await window.api.bookings.update(Number(id), { ...form, bookingNo })
-        navigate(`/bookings/${updated.id}`)
+      if (bookingId !== undefined) {
+        const updated = await window.api.bookings.update(bookingId, { ...form, bookingNo })
+        onSaved(updated)
       } else {
-        const created = await window.api.bookings.create({ ...form, bookingNo })
-        navigate(`/bookings/${created.id}`)
+        const created = vehicles
+          ? await window.api.bookings.createWithVehicles({ ...form, bookingNo }, vehicles)
+          : await window.api.bookings.create({ ...form, bookingNo })
+        onSaved(created)
       }
     } catch (err) {
       setError(
         err instanceof Error && err.message.includes('UNIQUE')
-          ? 'Bu booking numarası zaten kayıtlı.'
-          : 'Kaydedilirken bir hata oluştu.'
+          ? t('bookingForm.duplicateBookingNo')
+          : getErrorMessage(err, t('bookingForm.saveErrorGeneric'))
       )
     } finally {
       setSaving(false)
@@ -155,18 +224,11 @@ export default function BookingFormPage(): React.JSX.Element {
   }
 
   return (
-    <div>
-      <div className="breadcrumb">
-        <Link to="/bookings">Bookingler</Link> / {isEdit ? 'Düzenle' : 'Yeni Booking'}
-      </div>
-      <div className="page-title">
-        <h1>{isEdit ? 'Booking Düzenle' : 'Yeni Booking'}</h1>
-      </div>
-
-      <form className="surface" style={{ padding: 20 }} onSubmit={handleSubmit}>
+    <form className="surface" style={{ padding: 20 }} onSubmit={handleSubmit}>
+      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <div className="form-grid">
           <div className="form-field">
-            <label>Booking No *</label>
+            <label>{t('bookingForm.bookingNoLabel')} *</label>
             <input
               className="text-input"
               value={form.bookingNo}
@@ -175,17 +237,17 @@ export default function BookingFormPage(): React.JSX.Element {
             />
           </div>
           <div className="form-field">
-            <label>Kategori</label>
+            <label>{t('bookings.category')}</label>
             <SearchableSelect
               value={form.category ?? ''}
               onChange={(v) => update('category', v)}
               options={lookupOptions.category}
               onAddOption={(v) => handleAddLookupOption('category', v)}
-              placeholder="ör. Mundra, Bandar Abbas"
+              placeholder={t('bookingForm.categoryPlaceholder')}
             />
           </div>
           <div className="form-field">
-            <label>Destination *</label>
+            <label>{t('reports.destination')} *</label>
             <SearchableSelect
               value={form.destination ?? ''}
               onChange={(v) => update('destination', v)}
@@ -195,7 +257,7 @@ export default function BookingFormPage(): React.JSX.Element {
             />
           </div>
           <div className="form-field">
-            <label>Vessel Departure *</label>
+            <label>{t('reports.vesselDeparture')} *</label>
             <input
               className="date-input"
               type="date"
@@ -205,7 +267,7 @@ export default function BookingFormPage(): React.JSX.Element {
             />
           </div>
           <div className="form-field">
-            <label>Declaration Cut Off *</label>
+            <label>{t('reports.declarationCutOff')} *</label>
             <input
               className="date-input"
               type="date"
@@ -215,7 +277,7 @@ export default function BookingFormPage(): React.JSX.Element {
             />
           </div>
           <div className="form-field">
-            <label>SI Cut Off *</label>
+            <label>{t('reports.siCutOff')} *</label>
             <input
               className="date-input"
               type="date"
@@ -225,7 +287,7 @@ export default function BookingFormPage(): React.JSX.Element {
             />
           </div>
           <div className="form-field">
-            <label>Line</label>
+            <label>{t('reports.line')}</label>
             <SearchableSelect
               value={form.line ?? ''}
               onChange={(v) => update('line', v)}
@@ -234,7 +296,7 @@ export default function BookingFormPage(): React.JSX.Element {
             />
           </div>
           <div className="form-field">
-            <label>POL *</label>
+            <label>{t('reports.pol')} *</label>
             <SearchableSelect
               value={form.pol ?? ''}
               onChange={(v) => update('pol', v)}
@@ -244,7 +306,23 @@ export default function BookingFormPage(): React.JSX.Element {
             />
           </div>
           <div className="form-field">
-            <label>Statü *</label>
+            <label>{t('bookings.unit')}</label>
+            <input
+              className="text-input"
+              type="number"
+              min={selectedVehicleCount}
+              step={1}
+              inputMode="numeric"
+              value={form.unit ?? ''}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/[^0-9]/g, '')
+                update('unit', digits === '' ? null : Number(digits))
+              }}
+              placeholder={t('bookingForm.unitPlaceholder')}
+            />
+          </div>
+          <div className="form-field">
+            <label>{t('bookings.statusColumn')} *</label>
             <select
               className="select-input"
               value={form.status}
@@ -252,13 +330,13 @@ export default function BookingFormPage(): React.JSX.Element {
             >
               {BOOKING_STATUSES.map((s) => (
                 <option key={s} value={s}>
-                  {BOOKING_STATUS_LABELS[s]}
+                  {t(`enums.bookingStatus.${s}`)}
                 </option>
               ))}
             </select>
           </div>
           <div className="form-field full">
-            <label>Durum / Not</label>
+            <label>{t('containers.statusNote')}</label>
             <textarea
               className="textarea-input"
               rows={3}
@@ -266,23 +344,34 @@ export default function BookingFormPage(): React.JSX.Element {
               onChange={(e) => update('notes', e.target.value)}
             />
           </div>
+          <div className="form-field">
+            <label>{t('bookingForm.customerLabel')}</label>
+            <select
+              className="select-input"
+              value={form.customerId ?? ''}
+              onChange={(e) => update('customerId', e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">{t('bookingForm.customerNone')}</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {error && <div className="form-error">{error}</div>}
 
         <div className="form-actions">
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={() => navigate(isEdit ? `/bookings/${id}` : '/bookings')}
-          >
-            İptal
+          <button type="button" className="btn secondary" onClick={onCancel} disabled={saving}>
+            {t('common.dismiss')}
           </button>
           <button type="submit" className="btn" disabled={saving}>
-            {saving ? 'Kaydediliyor...' : 'Kaydet'}
+            {saving ? t('auth.saving') : t('common.save')}
           </button>
         </div>
-      </form>
-    </div>
+      </fieldset>
+    </form>
   )
 }
